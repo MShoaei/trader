@@ -1,17 +1,24 @@
 package cmd
 
 import (
+	"crypto/tls"
 	"fmt"
-	"github.com/adshao/go-binance"
-	"log"
+	"net/http"
+	"net/url"
 	"os"
 
+	binance "github.com/adshao/go-binance/v2"
+	"github.com/gorilla/websocket"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 var (
-	client *binance.Client
+	testNet bool
+	debug   bool
+	client  *binance.Client
+	proxy   string
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -31,6 +38,11 @@ func Execute() {
 }
 
 func init() {
+	log.SetLevel(log.DebugLevel)
+	rootCmd.PersistentFlags().BoolVarP(&testNet, "test", "t", false, "set to use binance test network")
+
+	rootCmd.PersistentFlags().BoolVarP(&debug, "debug", "d", false, "set to enable debug output")
+	rootCmd.PersistentFlags().StringVar(&proxy, "proxy", "", "set to enable proxy")
 	cobra.OnInitialize(initConfig)
 }
 
@@ -43,8 +55,25 @@ func initConfig() {
 	if err := viper.ReadInConfig(); err != nil {
 		log.Fatalf("failed to read API keys: %v", err)
 	}
-	if viper.GetString("key") == "" || viper.GetString("secret") == "" {
-		log.Fatalln("API key or secret is empty")
+	if testNet {
+		if viper.GetString("test.key") == "" || viper.GetString("test.secret") == "" {
+			log.Fatalln("test network API key or secret is empty")
+		}
+	} else {
+		if viper.GetString("main.key") == "" || viper.GetString("main.secret") == "" {
+			log.Fatalln("main network API key or secret is empty")
+		}
 	}
-	client = binance.NewClient(viper.GetString("key"), viper.GetString("secret"))
+	binance.UseTestnet = testNet
+	client = binance.NewClient(viper.GetString("test.key"), viper.GetString("test.secret"))
+	client.Debug = debug
+
+	if proxy != "" {
+		proxyURL, _ := url.Parse(proxy)
+		client.HTTPClient.Transport = &http.Transport{
+			Proxy:           http.ProxyURL(proxyURL),
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}
+		websocket.DefaultDialer.Proxy = http.ProxyURL(proxyURL)
+	}
 }
