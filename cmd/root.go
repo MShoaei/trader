@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 
 	binance "github.com/adshao/go-binance/v2"
 	"github.com/gorilla/websocket"
@@ -15,10 +16,11 @@ import (
 )
 
 var (
-	testNet bool
-	debug   bool
-	client  *binance.Client
-	proxy   string
+	testNet     bool
+	debug       bool
+	client      *binance.Client
+	proxy       string
+	interruptCh = make(chan os.Signal, 1)
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -39,10 +41,10 @@ func Execute() {
 
 func init() {
 	log.SetLevel(log.DebugLevel)
-	rootCmd.PersistentFlags().BoolVarP(&testNet, "test", "t", false, "set to use binance test network")
-
+	rootCmd.PersistentFlags().BoolVar(&testNet, "test", false, "set to use binance test network")
 	rootCmd.PersistentFlags().BoolVarP(&debug, "debug", "d", false, "set to enable debug output")
 	rootCmd.PersistentFlags().StringVar(&proxy, "proxy", "", "set to enable proxy")
+
 	cobra.OnInitialize(initConfig)
 }
 
@@ -55,17 +57,26 @@ func initConfig() {
 	if err := viper.ReadInConfig(); err != nil {
 		log.Fatalf("failed to read API keys: %v", err)
 	}
+	var (
+		key    string
+		secret string
+	)
 	if testNet {
-		if viper.GetString("test.key") == "" || viper.GetString("test.secret") == "" {
+		key = viper.GetString("test.key")
+		secret = viper.GetString("test.secret")
+		if key == "" || secret == "" {
 			log.Fatalln("test network API key or secret is empty")
 		}
+		client = binance.NewClient(key, secret)
 	} else {
-		if viper.GetString("main.key") == "" || viper.GetString("main.secret") == "" {
+		key = viper.GetString("main.key")
+		secret = viper.GetString("main.secret")
+		if key == "" || secret == "" {
 			log.Fatalln("main network API key or secret is empty")
 		}
+		client = binance.NewClient(key, secret)
 	}
 	binance.UseTestnet = testNet
-	client = binance.NewClient(viper.GetString("test.key"), viper.GetString("test.secret"))
 	client.Debug = debug
 
 	if proxy != "" {
@@ -76,4 +87,5 @@ func initConfig() {
 		}
 		websocket.DefaultDialer.Proxy = http.ProxyURL(proxyURL)
 	}
+	signal.Notify(interruptCh, os.Interrupt)
 }
