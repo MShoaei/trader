@@ -12,7 +12,7 @@ require (
 	github.com/sdcoffey/big v0.7.0
 	github.com/sdcoffey/techan v0.12.1-0.20210317020504-572c478f546e
 	github.com/sirupsen/logrus v1.8.1
-	github.com/spf13/afero v1.6.0
+	github.com/spf13/afero v1.6.0 // indirect
 	github.com/spf13/cast v1.3.1 // indirect
 	github.com/spf13/cobra v1.1.3
 	github.com/spf13/jwalterweatherman v1.1.0 // indirect
