@@ -4,14 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path"
 	"strings"
 	"time"
 
-	binance "github.com/adshao/go-binance/v2"
-	"github.com/spf13/afero"
+	"github.com/adshao/go-binance/v2"
 	"github.com/spf13/cobra"
 )
 
@@ -35,9 +33,35 @@ func newFetchCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			klines, err := client.NewKlinesService().Symbol(symbol).Interval(interval).Limit(limit).Do(context.Background())
+			elemCount := 0
+			klines := make([]*binance.Kline, limit)
+
+			fmt.Println(time.Now().Add(-30 * time.Minute).Round(30 * time.Minute))
+			newKlines, err := client.NewKlinesService().
+				Symbol(symbol).
+				EndTime(int64(time.Now().Add(-30*time.Minute).Round(30*time.Minute).Unix()*1e3 - 1)).
+				Interval(interval).
+				Limit(limit).
+				Do(context.Background())
 			if err != nil {
 				return err
+			}
+
+			for elemCount != len(klines) {
+				start := limit - 1000 - elemCount
+				for i := 0; i < len(newKlines); i++ {
+					klines[start+i] = newKlines[i]
+					elemCount++
+				}
+				newKlines, err = client.NewKlinesService().
+					Symbol(symbol).
+					EndTime(newKlines[0].OpenTime).
+					Interval(interval).
+					Limit(limit - elemCount).
+					Do(context.Background())
+				if err != nil {
+					return err
+				}
 			}
 			if err := json.NewEncoder(data).Encode(klines); err != nil {
 				return err
@@ -55,34 +79,6 @@ func newFetchCommand() *cobra.Command {
 	f.StringVarP(&output, "output", "o", "", "file to store the data")
 
 	return cmd
-}
-
-func fetchKlineData(symbol, interval string, limit int, file string) (klines []*binance.Kline, err error) {
-	if exists, _ := afero.Exists(afero.NewOsFs(), file); !exists {
-		log.Println("no history found. fetching data.")
-		klines, err = client.NewKlinesService().Symbol(symbol).Interval(interval).Limit(limit).Do(context.Background())
-		if err != nil {
-			return nil, err
-		}
-	}
-	f, _ := os.Open(file)
-	dec := json.NewDecoder(f)
-	_, err = dec.Token()
-	if err != nil {
-		return nil, err
-	}
-	for dec.More() {
-		var candle binance.Kline
-		err := dec.Decode(&candle)
-		if err != nil {
-			return nil, err
-		}
-		klines = append(klines, &candle)
-	}
-	if klines[len(klines)-1].CloseTime < time.Now().Unix()*1e3 {
-		fmt.Println("Do something")
-	}
-	return klines, err
 }
 
 func init() {
