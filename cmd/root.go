@@ -3,6 +3,7 @@ package cmd
 import (
 	"crypto/tls"
 	"fmt"
+	"github.com/adshao/go-binance/v2/futures"
 	"net/http"
 	"net/url"
 	"os"
@@ -18,7 +19,7 @@ import (
 var (
 	testNet     bool
 	debug       bool
-	client      *binance.Client
+	client      *futures.Client
 	proxy       string
 	interruptCh = make(chan os.Signal, 1)
 )
@@ -67,16 +68,16 @@ func initConfig() {
 		if key == "" || secret == "" {
 			log.Fatalln("test network API key or secret is empty")
 		}
-		client = binance.NewClient(key, secret)
+		client = binance.NewFuturesClient(key, secret)
 	} else {
 		key = viper.GetString("main.key")
 		secret = viper.GetString("main.secret")
 		if key == "" || secret == "" {
 			log.Fatalln("main network API key or secret is empty")
 		}
-		client = binance.NewClient(key, secret)
+		client = binance.NewFuturesClient(key, secret)
 	}
-	binance.UseTestnet = testNet
+	futures.UseTestnet = testNet
 	client.Debug = debug
 
 	if proxy != "" {
