@@ -1,49 +1,49 @@
-/*
-Copyright © 2021 Mohammad Shoaei <Mohammad.Shoaei@outlook.com>
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program. If not, see <http://www.gnu.org/licenses/>.
-*/
 package cmd
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"time"
 
+	"github.com/MShoaei/techan"
 	"github.com/adshao/go-binance/v2"
 	"github.com/sdcoffey/big"
-	"github.com/sdcoffey/techan"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
 // testCmd represents the test command
 func newAnalyzeCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "analyze",
+		Short: "analyze strategy using either crypto currency market data or forex data",
+		Args:  cobra.NoArgs,
+	}
+	return cmd
+}
+
+func newCryptoCommand() *cobra.Command {
 	var (
 		input   string
+		fetch   bool
 		logFile string
 		symbol  string
 		amount  float64
 	)
 	var analysisFile io.Writer
 	cmd := &cobra.Command{
-		Use:   "analyze",
-		Short: "analyze strategy with the provided data",
-		Long:  `analyze strategy with the provided data`,
+		Use:   "crypto",
+		Short: "analyze crypto data using the strategy",
+		Long:  "analyze crypto data using the strategy",
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			var err error
+			if logFile == "-" {
+				log.SetOutput(os.Stdout)
+				return nil
+			}
+
 			analysisFile, err = os.Create(logFile)
 			if err != nil {
 				return err
@@ -56,69 +56,109 @@ func newAnalyzeCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			candleC, err := candleGenerator(file)
-			if err != nil {
-				return err
-			}
+			candleC, err := cryptoCandleGenerator(file)
 
 			series := techan.NewTimeSeries()
 			record := techan.NewTradingRecord()
 
-			closeIndicator := techan.NewClosePriceIndicator(series)
+			closePrice := techan.NewClosePriceIndicator(series)
+			long, short, atr := createEMAStochATRStrategy(series)
 
-			strategy := createSingleStrategy(closeIndicator)
+			var (
+				stopLoss   techan.Rule = FalseRule{}
+				takeProfit techan.Rule = FalseRule{}
+			)
 
 			index := 0
-			for candle := range candleC {
-				series.AddCandle(candle)
-				if strategy.ShouldEnter(series.LastIndex(), record) {
-					log.Infof("entering at price: %s", candle.ClosePrice.FormattedString(2))
-					log.Debugln(index, candle)
+
+			for candleLow := range candleC {
+				series.AddCandle(candleLow)
+				if long.ShouldEnter(series.LastIndex(), record) && short.ShouldEnter(series.LastIndex(), record) {
+					log.Panicln("this should not happen")
+					continue
+				}
+
+				if long.ShouldEnter(series.LastIndex(), record) {
+					log.Infof("entering long at price: %f", candleLow.ClosePrice.Float())
+					log.Debugln(index, candleLow)
 					record.Operate(techan.Order{
 						Side:          techan.BUY,
 						Security:      symbol,
-						Price:         candle.ClosePrice,
-						Amount:        big.NewDecimal(amount).Sub(big.NewDecimal(amount).Mul(big.NewDecimal(0.001))),
-						ExecutionTime: candle.Period.Start,
+						Price:         candleLow.ClosePrice,
+						Amount:        big.NewDecimal(amount),
+						ExecutionTime: candleLow.Period.Start,
 					})
-				} else if strategy.ShouldExit(series.LastIndex(), record) {
-					log.Infof("exiting at price: %s", candle.ClosePrice.FormattedString(2))
-					log.Debugln(index, candle)
+					stopLoss = techan.UnderIndicatorRule{
+						First:  closePrice,
+						Second: techan.NewConstantIndicator(candleLow.ClosePrice.Sub(atr.Calculate(series.LastIndex()).Mul(big.NewDecimal(3.0))).Float()),
+					}
+					takeProfit = techan.OverIndicatorRule{
+						First:  closePrice,
+						Second: techan.NewConstantIndicator(candleLow.ClosePrice.Add(atr.Calculate(series.LastIndex()).Mul(big.NewDecimal(2.0))).Float()),
+					}
+				} else if short.ShouldEnter(series.LastIndex(), record) {
+					log.Infof("entering short at price: %f", candleLow.ClosePrice.Float())
+					log.Debugln(index, candleLow)
 					record.Operate(techan.Order{
 						Side:          techan.SELL,
 						Security:      symbol,
-						Price:         candle.ClosePrice,
-						Amount:        record.CurrentPosition().EntranceOrder().Amount.Sub(record.CurrentPosition().EntranceOrder().Amount.Mul(big.NewDecimal(0.0001))),
-						ExecutionTime: candle.Period.Start,
+						Price:         candleLow.ClosePrice,
+						Amount:        big.NewDecimal(amount),
+						ExecutionTime: candleLow.Period.Start,
 					})
+					stopLoss = techan.OverIndicatorRule{
+						First:  closePrice,
+						Second: techan.NewConstantIndicator(candleLow.ClosePrice.Add(atr.Calculate(series.LastIndex()).Mul(big.NewDecimal(3.0))).Float()),
+					}
+					takeProfit = techan.UnderIndicatorRule{
+						First:  closePrice,
+						Second: techan.NewConstantIndicator(candleLow.ClosePrice.Sub(atr.Calculate(series.LastIndex()).Mul(big.NewDecimal(2.0))).Float()),
+					}
+				} else if takeProfit.IsSatisfied(series.LastIndex(), record) || stopLoss.IsSatisfied(series.LastIndex(), record) {
+					var side techan.OrderSide
+					if record.CurrentPosition().IsShort() {
+						side = techan.BUY
+					} else {
+						side = techan.SELL
+					}
+					log.Infof("exiting at price: %f", candleLow.ClosePrice.Float())
+					log.Debugln(index, candleLow)
+					record.Operate(techan.Order{
+						Side:          side,
+						Security:      symbol,
+						Price:         candleLow.ClosePrice,
+						Amount:        record.CurrentPosition().EntranceOrder().Amount,
+						ExecutionTime: candleLow.Period.Start,
+					})
+					stopLoss = FalseRule{}
+					takeProfit = FalseRule{}
 				}
-				log.Infof("MACD: %f, MACD histogram: %f", strategy.macd.Calculate(series.LastIndex()).Float(), strategy.macdHist.Calculate(series.LastIndex()).Float())
 				index++
 			}
 
-			techan.LogTradesAnalysis{
+			log.Infof("Total profit: %f, Total trades: %f, Profitable trades: %f",
+				techan.TotalProfitAnalysis{}.Analyze(record),
+				techan.NumTradesAnalysis{}.Analyze(record),
+				techan.ProfitableTradesAnalysis{}.Analyze(record))
+			LogTradesAnalysis{
 				Writer: analysisFile,
 			}.Analyze(record)
-			log.Warnf("Total profit: %f, Profitable trades: %f",
-				techan.TotalProfitAnalysis{}.Analyze(record),
-				techan.ProfitableTradesAnalysis{}.Analyze(record))
 			return nil
 		},
 	}
 	f := cmd.Flags()
 	f.StringVarP(&input, "input", "i", "", "path to json file to read data from")
-	_ = cmd.MarkFlagRequired("input")
-	f.StringVarP(&logFile, "output", "o", "", "path to file to write analysis data")
-	_ = cmd.MarkFlagRequired("input")
+
+	f.BoolVarP(&fetch, "fetch", "f", false, "if data should be downloaded")
+	f.StringVarP(&logFile, "output", "o", "-", "path to file to write analysis data use '-' if you want to print to stdout")
 	f.StringVarP(&symbol, "symbol", "s", "", "symbol of the test")
 	_ = cmd.MarkFlagRequired("symbol")
 	f.Float64VarP(&amount, "amount", "a", 0.01, "amount of currency to use for trades")
 	_ = cmd.MarkFlagRequired("amount")
-
 	return cmd
 }
 
-func candleGenerator(input io.Reader) (candleC chan *techan.Candle, err error) {
+func cryptoCandleGenerator(input io.Reader) (candleC chan *techan.Candle, err error) {
 	candleC = make(chan *techan.Candle)
 	dec := json.NewDecoder(input)
 	_, err = dec.Token()
@@ -155,6 +195,37 @@ func candleGenerator(input io.Reader) (candleC chan *techan.Candle, err error) {
 	return candleC, nil
 }
 
+// LogTradesAnalysis is a wrapper around an io.Writer, which logs every trade executed to that writer
+type LogTradesAnalysis struct {
+	io.Writer
+}
+
+// Analyze logs trades to provided io.Writer
+func (lta LogTradesAnalysis) Analyze(record *techan.TradingRecord) float64 {
+	var profit big.Decimal
+	logOrder := func(trade *techan.Position) {
+		if trade.IsShort() {
+			fmt.Fprintln(lta.Writer, fmt.Sprintf("%s - enter with sell %s (%s @ $%s)", trade.EntranceOrder().ExecutionTime.UTC().Format(time.RFC822), trade.EntranceOrder().Security, trade.EntranceOrder().Amount, trade.EntranceOrder().Price))
+			fmt.Fprintln(lta.Writer, fmt.Sprintf("%s - exit with buy %s (%s @ $%s)", trade.ExitOrder().ExecutionTime.UTC().Format(time.RFC822), trade.ExitOrder().Security, trade.ExitOrder().Amount, trade.ExitOrder().Price))
+			profit = trade.ExitValue().Sub(trade.CostBasis()).Neg()
+		} else {
+			fmt.Fprintln(lta.Writer, fmt.Sprintf("%s - enter with buy %s (%s @ $%s)", trade.EntranceOrder().ExecutionTime.UTC().Format(time.RFC822), trade.EntranceOrder().Security, trade.EntranceOrder().Amount, trade.EntranceOrder().Price))
+			fmt.Fprintln(lta.Writer, fmt.Sprintf("%s - exit with sell %s (%s @ $%s)", trade.ExitOrder().ExecutionTime.UTC().Format(time.RFC822), trade.ExitOrder().Security, trade.ExitOrder().Amount, trade.ExitOrder().Price))
+			profit = trade.ExitValue().Sub(trade.CostBasis())
+		}
+		fmt.Fprintln(lta.Writer, fmt.Sprintf("Profit: $%s", profit))
+	}
+
+	for _, trade := range record.Trades {
+		if trade.IsClosed() {
+			logOrder(trade)
+		}
+	}
+	return 0.0
+}
+
 func init() {
-	rootCmd.AddCommand(newAnalyzeCommand())
+	ac := newAnalyzeCommand()
+	rootCmd.AddCommand(ac)
+	ac.AddCommand(newCryptoCommand())
 }
