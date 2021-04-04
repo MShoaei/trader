@@ -1,8 +1,9 @@
 module github.com/MShoaei/trader
 
-go 1.15
+go 1.16
 
 require (
+	github.com/MShoaei/techan v0.12.3
 	github.com/adshao/go-binance/v2 v2.2.1
 	github.com/fsnotify/fsnotify v1.4.9 // indirect
 	github.com/gorilla/websocket v1.4.2
@@ -10,7 +11,6 @@ require (
 	github.com/mitchellh/mapstructure v1.4.1 // indirect
 	github.com/pelletier/go-toml v1.8.1 // indirect
 	github.com/sdcoffey/big v0.7.0
-	github.com/sdcoffey/techan v0.12.1-0.20210317020504-572c478f546e
 	github.com/sirupsen/logrus v1.8.1
 	github.com/spf13/afero v1.6.0 // indirect
 	github.com/spf13/cast v1.3.1 // indirect
