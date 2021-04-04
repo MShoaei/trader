@@ -19,3 +19,4 @@ vendor/
 .vscode
 
 secret.yaml
+data/
