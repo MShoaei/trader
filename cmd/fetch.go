@@ -2,15 +2,21 @@ package cmd
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"strings"
 	"time"
 
 	"github.com/adshao/go-binance/v2"
+	"github.com/gorilla/websocket"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 // newFetchCommand create a new fetch cmd
@@ -21,10 +27,31 @@ func newFetchCommand() *cobra.Command {
 		limit    int
 		output   string
 	)
+	var client *binance.Client
 	cmd := &cobra.Command{
 		Use:   "fetch",
 		Short: "fetch and store data. it re-writes existing data",
 		Long:  `fetch and store data`,
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+
+			key := viper.GetString("main.key")
+			secret := viper.GetString("main.secret")
+			if key == "" || secret == "" {
+				log.Fatalln("main network API key or secret is empty")
+			}
+			client = binance.NewClient(key, secret)
+			client.Debug = debug
+
+			if proxy != "" {
+				proxyURL, _ := url.Parse(proxy)
+				client.HTTPClient.Transport = &http.Transport{
+					Proxy:           http.ProxyURL(proxyURL),
+					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+				}
+				websocket.DefaultDialer.Proxy = http.ProxyURL(proxyURL)
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if output == "" {
 				output = path.Join("data", strings.ToLower(symbol)+".json")
@@ -39,7 +66,7 @@ func newFetchCommand() *cobra.Command {
 			fmt.Println(time.Now().Add(-30 * time.Minute).Round(30 * time.Minute))
 			newKlines, err := client.NewKlinesService().
 				Symbol(symbol).
-				EndTime(int64(time.Now().Add(-30*time.Minute).Round(30*time.Minute).Unix()*1e3 - 1)).
+				EndTime(time.Now().Add(-30*time.Minute).Round(30*time.Minute).Unix()*1e3 - 1).
 				Interval(interval).
 				Limit(limit).
 				Do(context.Background())
