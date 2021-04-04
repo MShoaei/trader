@@ -2,16 +2,22 @@ package cmd
 
 import (
 	"context"
+	"github.com/adshao/go-binance/v2/futures"
 	"os"
-	"strconv"
 	"time"
 
-	binance "github.com/adshao/go-binance/v2"
+	"github.com/MShoaei/techan"
 	"github.com/sdcoffey/big"
-	"github.com/sdcoffey/techan"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
+
+type Order struct {
+	ID       string
+	Side     futures.PositionSideType
+	Quantity string
+	Price    string
+}
 
 func newWatchCommand() *cobra.Command {
 	var (
@@ -26,49 +32,54 @@ func newWatchCommand() *cobra.Command {
 	// record trades on this object
 	record := techan.NewTradingRecord()
 	var series *techan.TimeSeries
+	//orderIDs := map[string]Order{}
 
 	cmd := &cobra.Command{
 		Use:   "watch",
 		Short: "watch watches the market and places order when the conditions are true",
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			klines := make([]*binance.Kline, limit)
-			newKlines, err := client.NewKlinesService().
+			klines, err := client.NewKlinesService().
 				Symbol(symbol).
-				EndTime(int64(time.Now().Add(15*time.Minute).Round(30*time.Minute).Unix()*1e3 - 1)).
+				EndTime(time.Now().Add(15*time.Minute).Round(30*time.Minute).Unix()*1e3 - 1).
 				Interval(lowInterval).
 				Limit(limit).
 				Do(context.Background())
 			if err != nil {
 				return err
 			}
-
-			elemCount := 0
-			for elemCount != len(klines) {
-				start := limit - 1000 - elemCount
-				for i := 0; i < len(newKlines); i++ {
-					klines[start+i] = newKlines[i]
-					elemCount++
-				}
-				newKlines, err = client.NewKlinesService().
-					Symbol(symbol).
-					EndTime(newKlines[0].OpenTime).
-					Interval(lowInterval).
-					Limit(limit - elemCount).
-					Do(context.Background())
-				if err != nil {
-					return err
-				}
-			}
 			series = createTimeSeries(klines)
+
+			key, err := client.NewStartUserStreamService().Do(context.Background())
+			if err != nil {
+				return err
+			}
+			doneC, _, _ := futures.WsUserDataServe(key, func(event *futures.WsUserDataEvent) {
+				if event.Event == futures.UserDataEventTypeOrderTradeUpdate && event.OrderTradeUpdate.Status == futures.OrderStatusTypeFilled {
+					log.Infoln(event)
+				}
+			}, func(err error) {
+				log.Errorln(err)
+			})
+
+			<-doneC
+
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 
-			strategy := createSingleStrategy(techan.NewClosePriceIndicator(series))
+			strategy := createIchimokuStrategy(series)
+
+			closePrice := techan.NewClosePriceIndicator(series)
+			conv := NewConversionLineIndicator(series, 9)
+			base := NewBaseLineIndicator(series, 26)
+			spanA := NewLeadingSpanAIndicator(conv.(conversionLineIndicator), base.(baseLineIndicator))
+			spanB := NewLeadingSpanBIndicator(series, 52)
+			laggingSpan := NewLaggingSpanIndicator(series)
 
 			newCandle := series.LastCandle()
 
-			wsKlineHandler := func(event *binance.WsKlineEvent) {
+			index := 0
+			wsKlineHandler := func(event *futures.WsKlineEvent) {
 				if !event.Kline.IsFinal {
 					return
 				}
@@ -80,6 +91,15 @@ func newWatchCommand() *cobra.Command {
 				newCandle.TradeCount = uint(event.Kline.TradeNum)
 				if strategy.ShouldEnter(series.LastIndex(), record) {
 					log.Infof("entering at price: %s", newCandle.ClosePrice.FormattedString(2))
+
+					log.Infof("close: %s", closePrice.Calculate(series.LastIndex()).String())
+					log.Infof("conv: %s", conv.Calculate(series.LastIndex()).String())
+					log.Infof("base: %s", base.Calculate(series.LastIndex()).String())
+					log.Infof("spanA: %s", spanA.Calculate(series.LastIndex()).String())
+					log.Infof("spanB: %s", spanB.Calculate(series.LastIndex()).String())
+					log.Infof("laggingSpan: %s", laggingSpan.Calculate(series.LastIndex()).String())
+
+					log.Debugln(index, newCandle)
 					record.Operate(techan.Order{
 						Side:          techan.BUY,
 						Security:      symbol,
@@ -88,17 +108,26 @@ func newWatchCommand() *cobra.Command {
 						ExecutionTime: time.Now(),
 					})
 					if !demo {
-						order, err := client.NewCreateOrderService().Symbol(symbol).
-							Side(binance.SideTypeBuy).Type(binance.OrderTypeLimit).
-							TimeInForce(binance.TimeInForceTypeGTC).Quantity(strconv.FormatFloat(amount, 'f', 7, 64)).
-							Price(newCandle.ClosePrice.FormattedString(7)).Do(context.Background())
-						if err != nil {
-							log.Panic(err)
-						}
-						log.Traceln(order)
+						//order, err := client.NewCreateOrderService().Symbol(symbol).
+						//	Side(binance.SideTypeBuy).Type(binance.OrderTypeLimit).
+						//	TimeInForce(binance.TimeInForceTypeGTC).Quantity(strconv.FormatFloat(amount, 'f', 7, 64)).
+						//	Price(newCandle.ClosePrice.FormattedString(7)).Do(context.Background())
+						//if err != nil {
+						//	log.Panic(err)
+						//}
+						//log.Traceln(order)
 					}
 				} else if strategy.ShouldExit(series.LastIndex(), record) {
 					log.Infof("exiting at price: %s", newCandle.ClosePrice.FormattedString(2))
+
+					log.Infof("close: %s", closePrice.Calculate(series.LastIndex()).String())
+					log.Infof("conv: %s", conv.Calculate(series.LastIndex()).String())
+					log.Infof("base: %s", base.Calculate(series.LastIndex()).String())
+					log.Infof("spanA: %s", spanA.Calculate(series.LastIndex()).String())
+					log.Infof("spanB: %s", spanB.Calculate(series.LastIndex()).String())
+					log.Infof("laggingSpan: %s", laggingSpan.Calculate(series.LastIndex()).String())
+
+					log.Debugln(index, newCandle)
 					record.Operate(techan.Order{
 						Side:          techan.SELL,
 						Security:      symbol,
@@ -107,27 +136,27 @@ func newWatchCommand() *cobra.Command {
 						ExecutionTime: time.Now(),
 					})
 					if !demo {
-						order, err := client.NewCreateOrderService().Symbol(symbol).
-							Side(binance.SideTypeSell).Type(binance.OrderTypeLimit).
-							TimeInForce(binance.TimeInForceTypeGTC).Quantity(strconv.FormatFloat(amount, 'f', 7, 64)).
-							Price(newCandle.ClosePrice.FormattedString(7)).Do(context.Background())
-						if err != nil {
-							log.Panic(err)
-						}
-						log.Traceln(order)
+						//order, err := client.NewCreateOrderService().Symbol(symbol).
+						//	Side(binance.SideTypeSell).Type(binance.OrderTypeLimit).
+						//	TimeInForce(binance.TimeInForceTypeGTC).Quantity(strconv.FormatFloat(amount, 'f', 7, 64)).
+						//	Price(newCandle.ClosePrice.FormattedString(7)).Do(context.Background())
+						//if err != nil {
+						//	log.Panic(err)
+						//}
+						//log.Traceln(order)
 					}
 				}
-				log.Infof("price: %s, MACD: %f, MACD histogram: %f", event.Kline.Close, strategy.macd.Calculate(series.LastIndex()).Float(), strategy.macdHist.Calculate(series.LastIndex()).Float())
 				newCandle = techan.NewCandle(newCandle.Period.Advance(1))
 				if success := series.AddCandle(newCandle); !success {
 					log.Fatalln("failed to add candle")
 				}
 				log.Debugln(event)
+				index++
 			}
 			errHandler := func(err error) {
 				log.Info(err)
 			}
-			doneC, _, err := binance.WsKlineServe(symbol, lowInterval, wsKlineHandler, errHandler)
+			doneC, _, err := futures.WsKlineServe(symbol, lowInterval, wsKlineHandler, errHandler)
 			if err != nil {
 				return err
 			}
@@ -135,7 +164,7 @@ func newWatchCommand() *cobra.Command {
 			select {
 			case <-doneC:
 			case <-interruptCh:
-				recordLogFile, _ := os.Create(time.Now().Format(time.RFC822Z) + ".log")
+				recordLogFile, _ := os.Create(symbol + "-" + time.Now().Format("2006_01_02T15:04:05Z07:00") + ".log")
 				techan.LogTradesAnalysis{Writer: recordLogFile}.Analyze(record)
 				log.Infof("Total profit: %f", techan.TotalProfitAnalysis{}.Analyze(record))
 			}
@@ -158,7 +187,7 @@ func newWatchCommand() *cobra.Command {
 	return cmd
 }
 
-func createTimeSeries(klines []*binance.Kline) (series *techan.TimeSeries) {
+func createTimeSeries(klines []*futures.Kline) (series *techan.TimeSeries) {
 	series = techan.NewTimeSeries()
 	for i := 0; i < len(klines); i++ {
 		candle := techan.Candle{
