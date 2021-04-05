@@ -61,13 +61,7 @@ func newCryptoCommand() *cobra.Command {
 			series := techan.NewTimeSeries()
 			record := techan.NewTradingRecord()
 
-			closePrice := techan.NewClosePriceIndicator(series)
-			long, short, atr := createEMAStochATRStrategy(series)
-
-			var (
-				stopLoss   techan.Rule = FalseRule{}
-				takeProfit techan.Rule = FalseRule{}
-			)
+			long, short := createIchimokuStrategy(series)
 
 			index := 0
 
@@ -88,14 +82,6 @@ func newCryptoCommand() *cobra.Command {
 						Amount:        big.NewDecimal(amount),
 						ExecutionTime: candleLow.Period.Start,
 					})
-					stopLoss = techan.UnderIndicatorRule{
-						First:  closePrice,
-						Second: techan.NewConstantIndicator(candleLow.ClosePrice.Sub(atr.Calculate(series.LastIndex()).Mul(big.NewDecimal(3.0))).Float()),
-					}
-					takeProfit = techan.OverIndicatorRule{
-						First:  closePrice,
-						Second: techan.NewConstantIndicator(candleLow.ClosePrice.Add(atr.Calculate(series.LastIndex()).Mul(big.NewDecimal(2.0))).Float()),
-					}
 				} else if short.ShouldEnter(series.LastIndex(), record) {
 					log.Infof("entering short at price: %f", candleLow.ClosePrice.Float())
 					log.Debugln(index, candleLow)
@@ -106,32 +92,26 @@ func newCryptoCommand() *cobra.Command {
 						Amount:        big.NewDecimal(amount),
 						ExecutionTime: candleLow.Period.Start,
 					})
-					stopLoss = techan.OverIndicatorRule{
-						First:  closePrice,
-						Second: techan.NewConstantIndicator(candleLow.ClosePrice.Add(atr.Calculate(series.LastIndex()).Mul(big.NewDecimal(3.0))).Float()),
-					}
-					takeProfit = techan.UnderIndicatorRule{
-						First:  closePrice,
-						Second: techan.NewConstantIndicator(candleLow.ClosePrice.Sub(atr.Calculate(series.LastIndex()).Mul(big.NewDecimal(2.0))).Float()),
-					}
-				} else if takeProfit.IsSatisfied(series.LastIndex(), record) || stopLoss.IsSatisfied(series.LastIndex(), record) {
-					var side techan.OrderSide
-					if record.CurrentPosition().IsShort() {
-						side = techan.BUY
-					} else {
-						side = techan.SELL
-					}
+				} else if record.CurrentPosition().IsLong() && long.ShouldExit(series.LastIndex(), record) {
 					log.Infof("exiting at price: %f", candleLow.ClosePrice.Float())
 					log.Debugln(index, candleLow)
 					record.Operate(techan.Order{
-						Side:          side,
+						Side:          techan.SELL,
 						Security:      symbol,
 						Price:         candleLow.ClosePrice,
 						Amount:        record.CurrentPosition().EntranceOrder().Amount,
 						ExecutionTime: candleLow.Period.Start,
 					})
-					stopLoss = FalseRule{}
-					takeProfit = FalseRule{}
+				} else if record.CurrentPosition().IsShort() && short.ShouldExit(series.LastIndex(), record) {
+					log.Infof("exiting at price: %f", candleLow.ClosePrice.Float())
+					log.Debugln(index, candleLow)
+					record.Operate(techan.Order{
+						Side:          techan.BUY,
+						Security:      symbol,
+						Price:         candleLow.ClosePrice,
+						Amount:        record.CurrentPosition().EntranceOrder().Amount,
+						ExecutionTime: candleLow.Period.Start,
+					})
 				}
 				index++
 			}

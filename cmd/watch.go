@@ -67,7 +67,7 @@ func newWatchCommand() *cobra.Command {
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 
-			strategy := createIchimokuStrategy(series)
+			strategy, _ := createIchimokuStrategy(series)
 
 			closePrice := techan.NewClosePriceIndicator(series)
 			conv := NewConversionLineIndicator(series, 9)

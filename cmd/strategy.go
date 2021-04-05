@@ -30,9 +30,6 @@ func (k Kind) Strategy(series *techan.TimeSeries) techan.Strategy {
 	}
 }
 
-type BollingerStochStrategy struct {
-}
-
 func createBollingerStochStrategy(series *techan.TimeSeries) techan.Strategy {
 	closePrice := techan.NewClosePriceIndicator(series)
 
@@ -85,7 +82,7 @@ func createMACDStrategy(series *techan.TimeSeries) techan.Strategy {
 	}
 }
 
-func createIchimokuStrategy(series *techan.TimeSeries) techan.RuleStrategy {
+func createIchimokuStrategy(series *techan.TimeSeries) (long, short techan.RuleStrategy) {
 	closePrice := techan.NewClosePriceIndicator(series)
 	conv := NewConversionLineIndicator(series, 9)
 	base := NewBaseLineIndicator(series, 26)
@@ -93,35 +90,61 @@ func createIchimokuStrategy(series *techan.TimeSeries) techan.RuleStrategy {
 	spanB := NewLeadingSpanBIndicator(series, 52)
 	laggingSpan := NewLaggingSpanIndicator(series)
 
-	rule1 := techan.And(
+	longRule1 := techan.And(
 		techan.OverIndicatorRule{First: closePrice, Second: NewDispositionIndicator(spanA, -26)},
 		techan.OverIndicatorRule{First: closePrice, Second: NewDispositionIndicator(spanB, -26)},
 	)
-	rule2 := techan.OverIndicatorRule{First: spanA, Second: spanB}
-	rule3 := techan.OverIndicatorRule{First: conv, Second: base}
-	rule4 := techan.And(
+	longRule2 := techan.OverIndicatorRule{First: spanA, Second: spanB}
+	longRule3 := techan.OverIndicatorRule{First: conv, Second: base}
+	longRule4 := techan.And(
 		techan.OverIndicatorRule{First: laggingSpan, Second: NewDispositionIndicator(spanA, -52)},
 		techan.OverIndicatorRule{First: laggingSpan, Second: NewDispositionIndicator(spanB, -52)},
 	)
-	buySignal := techan.And(
-		rule1,
-		techan.And(rule2,
-			techan.And(rule3, rule4),
+	long = techan.RuleStrategy{
+		EntryRule: techan.And(
+			longRule1,
+			techan.And(longRule2,
+				techan.And(longRule3, longRule4),
+			),
 		),
-	)
-	sellSignal := techan.Or(
-		techan.UnderIndicatorRule{First: laggingSpan, Second: NewDispositionIndicator(closePrice, -26)},
-		techan.UnderIndicatorRule{
-			First: closePrice,
-			Second: NewMinimumIndicator(
-				NewDispositionIndicator(spanA, -26),
-				NewDispositionIndicator(spanB, -26)),
-		})
-	return techan.RuleStrategy{
-		EntryRule:      buySignal,
-		ExitRule:       sellSignal,
+		ExitRule: techan.Or(
+			techan.UnderIndicatorRule{First: laggingSpan, Second: NewDispositionIndicator(closePrice, -26)},
+			techan.UnderIndicatorRule{
+				First: closePrice,
+				Second: NewMinimumIndicator(
+					NewDispositionIndicator(spanA, -26),
+					NewDispositionIndicator(spanB, -26)),
+			}),
 		UnstablePeriod: 100,
 	}
+	shortRule1 := techan.And(
+		techan.UnderIndicatorRule{First: closePrice, Second: NewDispositionIndicator(spanA, -26)},
+		techan.UnderIndicatorRule{First: closePrice, Second: NewDispositionIndicator(spanB, -26)},
+	)
+	shortRule2 := techan.UnderIndicatorRule{First: spanA, Second: spanB}
+	shortRule3 := techan.UnderIndicatorRule{First: conv, Second: base}
+	shortRule4 := techan.And(
+		techan.UnderIndicatorRule{First: laggingSpan, Second: NewDispositionIndicator(spanA, -52)},
+		techan.UnderIndicatorRule{First: laggingSpan, Second: NewDispositionIndicator(spanB, -52)},
+	)
+	short = techan.RuleStrategy{
+		EntryRule: techan.And(
+			shortRule1,
+			techan.And(shortRule2,
+				techan.And(shortRule3, shortRule4),
+			),
+		),
+		ExitRule: techan.Or(
+			techan.OverIndicatorRule{First: laggingSpan, Second: NewDispositionIndicator(closePrice, -26)},
+			techan.OverIndicatorRule{
+				First: closePrice,
+				Second: NewMinimumIndicator(
+					NewDispositionIndicator(spanA, -26),
+					NewDispositionIndicator(spanB, -26)),
+			}),
+		UnstablePeriod: 100,
+	}
+	return long, short
 }
 
 type EMAStochATRStrategy struct {
