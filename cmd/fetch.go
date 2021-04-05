@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/adshao/go-binance/v2"
-	"github.com/gorilla/websocket"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -26,6 +25,7 @@ func newFetchCommand() *cobra.Command {
 		interval string
 		limit    int
 		output   string
+		_append  bool
 	)
 	var client *binance.Client
 	cmd := &cobra.Command{
@@ -33,7 +33,6 @@ func newFetchCommand() *cobra.Command {
 		Short: "fetch and store data. it re-writes existing data",
 		Long:  `fetch and store data`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-
 			key := viper.GetString("main.key")
 			secret := viper.GetString("main.secret")
 			if key == "" || secret == "" {
@@ -48,7 +47,6 @@ func newFetchCommand() *cobra.Command {
 					Proxy:           http.ProxyURL(proxyURL),
 					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 				}
-				websocket.DefaultDialer.Proxy = http.ProxyURL(proxyURL)
 			}
 			return nil
 		},
@@ -56,19 +54,41 @@ func newFetchCommand() *cobra.Command {
 			if output == "" {
 				output = path.Join("data", strings.ToLower(symbol)+".json")
 			}
-			data, err := os.Create(output)
-			if err != nil {
-				return err
+			var (
+				data      *os.File
+				err       error
+				elemCount int
+				klines    []*binance.Kline
+			)
+			endTime := time.Now().Add(-30*time.Minute).Round(30*time.Minute).Unix() * 1e3
+			if _append {
+				data, err = os.Open(output)
+				if err != nil {
+					return err
+				}
+				klines = make([]*binance.Kline, 0, limit)
+				err = json.NewDecoder(data).Decode(&klines)
+				if err != nil {
+					return err
+				}
+				if len(klines) >= limit {
+					return fmt.Errorf("file already has %d candles", len(klines))
+				}
+				endTime = klines[0].OpenTime - 1
+				elemCount = len(klines)
+				klines = append(klines[:0], append(make([]*binance.Kline, limit-len(klines)), klines...)...)
+			} else {
+				klines = make([]*binance.Kline, limit)
 			}
-			elemCount := 0
-			klines := make([]*binance.Kline, limit)
 
+			//ticker := time.NewTicker(2 * time.Second)
+			//defer ticker.Stop()
 			fmt.Println(time.Now().Add(-30 * time.Minute).Round(30 * time.Minute))
 			newKlines, err := client.NewKlinesService().
 				Symbol(symbol).
-				EndTime(time.Now().Add(-30*time.Minute).Round(30*time.Minute).Unix()*1e3 - 1).
+				EndTime(endTime).
 				Interval(interval).
-				Limit(limit).
+				Limit(1000).
 				Do(context.Background())
 			if err != nil {
 				return err
@@ -76,20 +96,23 @@ func newFetchCommand() *cobra.Command {
 
 			for elemCount != len(klines) {
 				start := limit - 1000 - elemCount
+				log.Infof("getting data from %d to %d", start, start+1000)
 				for i := 0; i < len(newKlines); i++ {
 					klines[start+i] = newKlines[i]
 					elemCount++
 				}
+				//<-ticker.C
 				newKlines, err = client.NewKlinesService().
 					Symbol(symbol).
-					EndTime(newKlines[0].OpenTime).
+					EndTime(newKlines[0].OpenTime - 1).
 					Interval(interval).
-					Limit(limit - elemCount).
+					Limit(1000).
 					Do(context.Background())
 				if err != nil {
 					return err
 				}
 			}
+			data, _ = os.Create(output)
 			if err := json.NewEncoder(data).Encode(klines); err != nil {
 				return err
 			}
@@ -102,7 +125,8 @@ func newFetchCommand() *cobra.Command {
 	_ = cmd.MarkFlagRequired("symbol")
 	f.StringVarP(&interval, "interval", "i", "", "the interval to query e.g. 30m")
 	_ = cmd.MarkFlagRequired("interval")
-	f.IntVarP(&limit, "limit", "l", 25, "number of candles to query")
+	f.IntVarP(&limit, "limit", "l", 25, "number of candles to query. if append is set this value is the total number of candles stored after the operation")
+	f.BoolVar(&_append, "append", false, "set to append to existing data")
 	f.StringVarP(&output, "output", "o", "", "file to store the data")
 
 	return cmd
