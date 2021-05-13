@@ -58,15 +58,15 @@ func (pta ProfitableTradesAnalysis) Analyze(record *techan.TradingRecord) float6
 }
 
 type CommissionAnalysis struct {
-	commission float64
+	Commission float64
 }
 
 // Analyze analyzes the trading record for the total commission cost.
 func (ca CommissionAnalysis) Analyze(record *techan.TradingRecord) float64 {
 	total := big.ZERO
 	for _, trade := range record.Trades {
-		total = total.Add(trade.CostBasis().Mul(big.NewDecimal(ca.commission * 0.01)))
-		total = total.Add(trade.ExitValue().Mul(big.NewDecimal(ca.commission * 0.01)))
+		total = total.Add(trade.CostBasis().Mul(big.NewDecimal(ca.Commission * 0.01)))
+		total = total.Add(trade.ExitValue().Mul(big.NewDecimal(ca.Commission * 0.01)))
 	}
 	return total.Float()
 }
