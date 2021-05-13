@@ -3,13 +3,12 @@ package cmd
 import (
 	"crypto/tls"
 	"fmt"
-	"github.com/adshao/go-binance/v2/futures"
 	"net/http"
 	"net/url"
 	"os"
-	"os/signal"
 
-	binance "github.com/adshao/go-binance/v2"
+	"github.com/MShoaei/trader/server"
+	"github.com/adshao/go-binance/v2"
 	"github.com/gorilla/websocket"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -17,11 +16,10 @@ import (
 )
 
 var (
-	testNet     bool
-	debug       bool
-	client      *futures.Client
-	proxy       string
-	interruptCh = make(chan os.Signal, 1)
+	testNet bool
+	debug   bool
+	client  *binance.Client
+	proxy   string
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -29,6 +27,10 @@ var rootCmd = &cobra.Command{
 	Use:   "trader",
 	Short: "trader is a bot to automate crypto trading on binance.com",
 	Long:  `trader is a bot to automate crypto trading on binance.com`,
+	Run: func(cmd *cobra.Command, args []string) {
+		s := server.NewServer()
+		s.Run()
+	},
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -41,7 +43,7 @@ func Execute() {
 }
 
 func init() {
-	log.SetLevel(log.DebugLevel)
+	log.SetLevel(log.InfoLevel)
 	rootCmd.PersistentFlags().BoolVar(&testNet, "test", false, "set to use binance test network")
 	rootCmd.PersistentFlags().BoolVarP(&debug, "debug", "d", false, "set to enable debug output")
 	rootCmd.PersistentFlags().StringVar(&proxy, "proxy", "", "set to enable proxy")
@@ -68,17 +70,21 @@ func initConfig() {
 		if key == "" || secret == "" {
 			log.Fatalln("test network API key or secret is empty")
 		}
-		client = binance.NewFuturesClient(key, secret)
+		client = binance.NewClient(key, secret)
 	} else {
 		key = viper.GetString("main.key")
 		secret = viper.GetString("main.secret")
 		if key == "" || secret == "" {
 			log.Fatalln("main network API key or secret is empty")
 		}
-		client = binance.NewFuturesClient(key, secret)
+		client = binance.NewClient(key, secret)
 	}
-	futures.UseTestnet = testNet
+	binance.UseTestnet = testNet
 	client.Debug = debug
+
+	if debug {
+		log.SetLevel(log.DebugLevel)
+	}
 
 	if proxy != "" {
 		proxyURL, _ := url.Parse(proxy)
@@ -88,5 +94,4 @@ func initConfig() {
 		}
 		websocket.DefaultDialer.Proxy = http.ProxyURL(proxyURL)
 	}
-	signal.Notify(interruptCh, os.Interrupt)
 }

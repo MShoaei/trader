@@ -1,4 +1,4 @@
-package cmd
+package internals
 
 import (
 	"github.com/MShoaei/techan"
@@ -7,7 +7,6 @@ import (
 
 type conversionLineIndicator struct {
 	ph, pl techan.Indicator
-	window int
 }
 
 func NewConversionLineIndicator(series *techan.TimeSeries, window int) techan.Indicator {
@@ -23,7 +22,6 @@ func (cli conversionLineIndicator) Calculate(index int) big.Decimal {
 
 type baseLineIndicator struct {
 	ph, pl techan.Indicator
-	window int
 }
 
 func NewBaseLineIndicator(series *techan.TimeSeries, window int) techan.Indicator {
@@ -55,7 +53,6 @@ func (lsa leadingSpanAIndicator) Calculate(index int) big.Decimal {
 
 type leadingSpanBIndicator struct {
 	ph, pl techan.Indicator
-	window int
 }
 
 func NewLeadingSpanBIndicator(series *techan.TimeSeries, window int) techan.Indicator {

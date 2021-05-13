@@ -1,88 +1,91 @@
-package cmd
+package internals
 
 import (
+	"math"
+
 	"github.com/MShoaei/techan"
 	"github.com/sdcoffey/big"
-	"math"
 )
 
-type CustomStrategy struct {
-	techan.RuleStrategy
-	macd     techan.Indicator
-	macdHist techan.Indicator
-}
+type DynamicStrategyFunc func(*techan.TimeSeries) (long, short techan.RuleStrategy)
 
-type Kind int
+//type StaticStrategyFunc func(*techan.TimeSeries) (long, short techan.Rule)
 
-const (
-	BollingerStoch Kind = iota
-	MACD
-)
-
-func (k Kind) Strategy(series *techan.TimeSeries) techan.Strategy {
-	switch k {
-	case BollingerStoch:
-		return createBollingerStochStrategy(series)
-	case MACD:
-		return createMACDStrategy(series)
-	default:
-		return nil
-	}
-}
-
-func createBollingerStochStrategy(series *techan.TimeSeries) techan.Strategy {
+func CreateBollingerStochStrategy(series *techan.TimeSeries) (long, short techan.RuleStrategy) {
 	closePrice := techan.NewClosePriceIndicator(series)
 
 	bbUpper := techan.NewBollingerUpperBandIndicator(closePrice, 20, 2)
 	bbLower := techan.NewBollingerLowerBandIndicator(closePrice, 20, 2)
 
 	stoch := techan.NewSlowStochasticIndicator(techan.NewFastStochasticIndicator(series, 14), 3)
-	stopLoss := techan.NewStopLossRule(series, -0.1)
 
-	sma := techan.NewSimpleMovingAverage(closePrice, 60)
-	trend := techan.NewTrendlineIndicator(sma, 10)
-
-	buySignal := techan.And(techan.UnderIndicatorRule{First: stoch, Second: techan.NewConstantIndicator(20)}, techan.NewCrossUpIndicatorRule(bbLower, closePrice))
-	sellSignal := techan.Or(
-		stopLoss,
-		techan.Or(
-			techan.UnderIndicatorRule{First: trend, Second: techan.NewConstantIndicator(0)},
-			techan.Or(
-				techan.OverIndicatorRule{First: stoch, Second: techan.NewConstantIndicator(80)},
-				techan.OverIndicatorRule{First: closePrice, Second: bbUpper},
-			),
-		),
+	longEntrySignal := techan.And(techan.UnderIndicatorRule{First: stoch, Second: techan.NewConstantIndicator(20)}, techan.NewCrossUpIndicatorRule(bbLower, closePrice))
+	longExitSignal := techan.Or(
+		techan.OverIndicatorRule{First: stoch, Second: techan.NewConstantIndicator(80)},
+		techan.OverIndicatorRule{First: closePrice, Second: bbUpper},
 	)
-	return techan.RuleStrategy{
-		EntryRule:      buySignal,
-		ExitRule:       sellSignal,
+	long = techan.RuleStrategy{
+		EntryRule:      longEntrySignal,
+		ExitRule:       longExitSignal,
 		UnstablePeriod: 100,
 	}
+
+	shortEntrySignal := techan.And(techan.OverIndicatorRule{First: stoch, Second: techan.NewConstantIndicator(80)}, techan.NewCrossDownIndicatorRule(closePrice, bbUpper))
+	shortExitSignal := techan.Or(
+		techan.OverIndicatorRule{First: stoch, Second: techan.NewConstantIndicator(80)},
+		techan.OverIndicatorRule{First: closePrice, Second: bbUpper},
+	)
+	short = techan.RuleStrategy{
+		EntryRule:      shortEntrySignal,
+		ExitRule:       shortExitSignal,
+		UnstablePeriod: 100,
+	}
+	return long, short
 }
 
-func createMACDStrategy(series *techan.TimeSeries) techan.Strategy {
+func CreateMACDStrategy(series *techan.TimeSeries) (long, short techan.RuleStrategy) {
 	closePrice := techan.NewClosePriceIndicator(series)
 	macd := techan.NewMACDIndicator(closePrice, 12, 26)
 	macdHist := techan.NewMACDHistogramIndicator(macd, 9)
 
-	stopLoss := techan.NewStopLossRule(series, -0.05)
-
-	macdSellSignal := techan.Or(
-		stopLoss,
-		techan.Or(
-			techan.UnderIndicatorRule{First: macdHist, Second: techan.NewConstantIndicator(0)},
-			techan.UnderIndicatorRule{First: macd, Second: macdHist},
-		),
-	)
-	macdBuySignal := techan.And(techan.OverIndicatorRule{First: macd, Second: macdHist}, techan.Not(macdSellSignal))
-	return techan.RuleStrategy{
-		EntryRule:      macdBuySignal,
-		ExitRule:       macdSellSignal,
+	long = techan.RuleStrategy{
+		EntryRule:      techan.NewCrossUpIndicatorRule(techan.NewConstantIndicator(0), macdHist),
+		ExitRule:       techan.NewCrossDownIndicatorRule(macdHist, techan.NewConstantIndicator(0)),
 		UnstablePeriod: 100,
 	}
+	short = techan.RuleStrategy{
+		EntryRule:      techan.NewCrossDownIndicatorRule(macdHist, techan.NewConstantIndicator(0)),
+		ExitRule:       techan.NewCrossUpIndicatorRule(techan.NewConstantIndicator(0), macdHist),
+		UnstablePeriod: 100,
+	}
+	return long, short
 }
 
-func createIchimokuStrategy(series *techan.TimeSeries) (long, short techan.RuleStrategy) {
+func CreateEMAStrategy(series *techan.TimeSeries) (long, short techan.RuleStrategy) {
+	closePrice := techan.NewClosePriceIndicator(series)
+	ema200 := techan.NewEMAIndicator(closePrice, 200)
+	ema50 := techan.NewEMAIndicator(closePrice, 50)
+
+	long = techan.RuleStrategy{
+		EntryRule: techan.And(
+			techan.OverIndicatorRule{First: closePrice, Second: ema50},
+			techan.OverIndicatorRule{First: ema50, Second: ema200},
+		),
+		ExitRule:       techan.UnderIndicatorRule{First: closePrice, Second: ema200},
+		UnstablePeriod: 200,
+	}
+	short = techan.RuleStrategy{
+		EntryRule: techan.And(
+			techan.UnderIndicatorRule{First: closePrice, Second: ema50},
+			techan.UnderIndicatorRule{First: ema50, Second: ema200},
+		),
+		ExitRule:       techan.OverIndicatorRule{First: closePrice, Second: ema200},
+		UnstablePeriod: 200,
+	}
+	return long, short
+}
+
+func CreateIchimokuStrategy(series *techan.TimeSeries) (long, short techan.RuleStrategy) {
 	closePrice := techan.NewClosePriceIndicator(series)
 	conv := NewConversionLineIndicator(series, 9)
 	base := NewBaseLineIndicator(series, 26)
@@ -147,19 +150,11 @@ func createIchimokuStrategy(series *techan.TimeSeries) (long, short techan.RuleS
 	return long, short
 }
 
-type EMAStochATRStrategy struct {
-	EMA50         techan.Indicator
-	EMA14         techan.Indicator
-	EMA8          techan.Indicator
-	StochasticRSI techan.Indicator
-	ATR           techan.Indicator
-}
-
-func createEMAStochATRStrategy(series *techan.TimeSeries) (long, short techan.RuleStrategy, atr techan.Indicator) {
+func CreateEMAStochATRStrategy(series *techan.TimeSeries) (long, short techan.RuleStrategy, atr techan.Indicator) {
 	closePrice := techan.NewClosePriceIndicator(series)
-	ema50 := techan.NewEMAIndicator(closePrice, 50)
-	ema14 := techan.NewEMAIndicator(closePrice, 14)
-	ema8 := techan.NewEMAIndicator(closePrice, 8)
+	ema50 := techan.NewEMAIndicator(closePrice, 50) //100
+	ema14 := techan.NewEMAIndicator(closePrice, 14) //19
+	ema8 := techan.NewEMAIndicator(closePrice, 8)   //8
 	stochRSI := NewStochasticRSI(series, 14)
 	atr = techan.NewAverageTrueRangeIndicator(series, 14)
 	longRule1 := techan.And(
@@ -195,7 +190,8 @@ func createEMAStochATRStrategy(series *techan.TimeSeries) (long, short techan.Ru
 			}, techan.UnderIndicatorRule{
 				First:  ema8,
 				Second: ema50,
-			}),
+			},
+		),
 	)
 	shortRule2 := techan.UnderIndicatorRule{First: closePrice, Second: ema8}
 	shortRule3 := techan.NewCrossDownIndicatorRule(stochRSI.StochD, stochRSI.StochK)
