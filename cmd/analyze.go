@@ -4,10 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
+	"math"
 	"os"
 	"time"
 
 	"github.com/MShoaei/techan"
+	"github.com/MShoaei/trader/internals"
 	"github.com/adshao/go-binance/v2"
 	"github.com/sdcoffey/big"
 	log "github.com/sirupsen/logrus"
@@ -26,11 +29,15 @@ func newAnalyzeCommand() *cobra.Command {
 
 func newCryptoCommand() *cobra.Command {
 	var (
-		input   string
-		fetch   bool
-		logFile string
-		symbol  string
-		amount  float64
+		input      string
+		fetch      bool
+		strategy   int
+		logFile    string
+		symbol     string
+		risk       float64
+		commission float64
+		leverage   int
+		count      int
 	)
 	var analysisFile io.Writer
 	cmd := &cobra.Command{
@@ -56,71 +63,46 @@ func newCryptoCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			candleC, err := cryptoCandleGenerator(file)
-
-			series := techan.NewTimeSeries()
-			record := techan.NewTradingRecord()
-
-			long, short := createIchimokuStrategy(series)
-
-			index := 0
-
-			for candleLow := range candleC {
-				series.AddCandle(candleLow)
-				if long.ShouldEnter(series.LastIndex(), record) && short.ShouldEnter(series.LastIndex(), record) {
-					log.Panicln("this should not happen")
-					continue
-				}
-
-				if long.ShouldEnter(series.LastIndex(), record) {
-					log.Infof("entering long at price: %f", candleLow.ClosePrice.Float())
-					log.Debugln(index, candleLow)
-					record.Operate(techan.Order{
-						Side:          techan.BUY,
-						Security:      symbol,
-						Price:         candleLow.ClosePrice,
-						Amount:        big.NewDecimal(amount),
-						ExecutionTime: candleLow.Period.Start,
-					})
-				} else if short.ShouldEnter(series.LastIndex(), record) {
-					log.Infof("entering short at price: %f", candleLow.ClosePrice.Float())
-					log.Debugln(index, candleLow)
-					record.Operate(techan.Order{
-						Side:          techan.SELL,
-						Security:      symbol,
-						Price:         candleLow.ClosePrice,
-						Amount:        big.NewDecimal(amount),
-						ExecutionTime: candleLow.Period.Start,
-					})
-				} else if record.CurrentPosition().IsLong() && long.ShouldExit(series.LastIndex(), record) {
-					log.Infof("exiting at price: %f", candleLow.ClosePrice.Float())
-					log.Debugln(index, candleLow)
-					record.Operate(techan.Order{
-						Side:          techan.SELL,
-						Security:      symbol,
-						Price:         candleLow.ClosePrice,
-						Amount:        record.CurrentPosition().EntranceOrder().Amount,
-						ExecutionTime: candleLow.Period.Start,
-					})
-				} else if record.CurrentPosition().IsShort() && short.ShouldExit(series.LastIndex(), record) {
-					log.Infof("exiting at price: %f", candleLow.ClosePrice.Float())
-					log.Debugln(index, candleLow)
-					record.Operate(techan.Order{
-						Side:          techan.BUY,
-						Security:      symbol,
-						Price:         candleLow.ClosePrice,
-						Amount:        record.CurrentPosition().EntranceOrder().Amount,
-						ExecutionTime: candleLow.Period.Start,
-					})
-				}
-				index++
+			candleC, err := cryptoCandleGenerator(file, count)
+			if err != nil {
+				return err
 			}
 
-			log.Infof("Total profit: %f, Total trades: %f, Profitable trades: %f",
-				techan.TotalProfitAnalysis{}.Analyze(record),
-				techan.NumTradesAnalysis{}.Analyze(record),
-				techan.ProfitableTradesAnalysis{}.Analyze(record))
-			LogTradesAnalysis{
+			var record *techan.TradingRecord
+			var series *techan.TimeSeries
+			switch strategy {
+			case 0:
+				series, record = RunDynamicStrategy(internals.CreateBollingerStochStrategy, candleC, symbol, risk, leverage)
+			case 1:
+				series, record = RunDynamicStrategy(internals.CreateMACDStrategy, candleC, symbol, risk, leverage)
+			case 2:
+				series, record = RunDynamicStrategy(internals.CreateEMAStrategy, candleC, symbol, risk, leverage)
+			case 3:
+				series, record = RunDynamicStrategy(internals.CreateIchimokuStrategy, candleC, symbol, risk, leverage)
+			default:
+				return fmt.Errorf("invalid strategy")
+			}
+
+			totalProfit := techan.TotalProfitAnalysis{}.Analyze(record)
+			commissionValue := internals.CommissionAnalysis{Commission: commission}.Analyze(record)
+			openPL := internals.OpenPLAnalysis{LastCandle: series.LastCandle()}.Analyze(record)
+			tradeCount := techan.NumTradesAnalysis{}.Analyze(record)
+			profitableTradeCount := internals.ProfitableTradesAnalysis{}.Analyze(record)
+			log.Infof("Total profit: %f, Commission: %f, PNL: %f",
+				totalProfit,
+				commissionValue,
+				openPL,
+			)
+			log.Infof("Total trades: %d, Profitable trades: %d, Win rate: %f%%",
+				int(tradeCount),
+				int(profitableTradeCount),
+				(profitableTradeCount/tradeCount)*100,
+			)
+			log.Infof("Win streak: %d, Lose streak: %d", int(internals.WinStreakAnalysis{}.Analyze(record)), int(internals.LoseStreakAnalysis{}.Analyze(record)))
+			log.Infof("Max win: %f, Max loss: %f", internals.MaxWinAnalysis{}.Analyze(record), internals.MaxLossAnalysis{}.Analyze(record))
+			log.Infof("Average win: %f, Average loss: %f", internals.AverageWinAnalysis{}.Analyze(record), internals.AverageLossAnalysis{}.Analyze(record))
+
+			internals.LogTradesAnalysis{
 				Writer: analysisFile,
 			}.Analyze(record)
 			return nil
@@ -128,32 +110,77 @@ func newCryptoCommand() *cobra.Command {
 	}
 	f := cmd.Flags()
 	f.StringVarP(&input, "input", "i", "", "path to json file to read data from")
-
 	f.BoolVarP(&fetch, "fetch", "f", false, "if data should be downloaded")
+	f.IntVar(&strategy, "strategy", 0, "the strategy to use for analysis")
+	_ = cmd.MarkFlagRequired("strategy")
 	f.StringVarP(&logFile, "output", "o", "-", "path to file to write analysis data use '-' if you want to print to stdout")
 	f.StringVarP(&symbol, "symbol", "s", "", "symbol of the test")
 	_ = cmd.MarkFlagRequired("symbol")
-	f.Float64VarP(&amount, "amount", "a", 0.01, "amount of currency to use for trades")
-	_ = cmd.MarkFlagRequired("amount")
+	f.Float64VarP(&risk, "risk", "r", 25.0, "total value of the position in USD including leverage. e.g. if the risk is 100$ and leverage is 25X the position would be 4$")
+	_ = cmd.MarkFlagRequired("risk")
+	f.Float64VarP(&commission, "commission", "c", 0.04, "commission per trade in percent")
+	f.IntVarP(&leverage, "leverage", "l", 1, "account leverage")
+	f.IntVar(&count, "count", 0, "use the latest 'count' candles. 0 means all")
 	return cmd
 }
 
-func cryptoCandleGenerator(input io.Reader) (candleC chan *techan.Candle, err error) {
+// RunDynamicStrategy runs the analysis using a strategy with dynamic exit rules.
+// A exit rule with fixed stop loss and/or take profit price is not a dynamic strategy.
+func RunDynamicStrategy(f internals.DynamicStrategyFunc, candleC chan *techan.Candle, symbol string, risk float64, leverage int) (*techan.TimeSeries, *techan.TradingRecord) {
+	series := techan.NewTimeSeries()
+	record := techan.NewTradingRecord()
+	long, _ := f(series)
+	index := 0
+	for candle := range candleC {
+		series.AddCandle(candle)
+
+		if long.ShouldEnter(series.LastIndex(), record) {
+			log.Debugf("entering long at price: %f", candle.ClosePrice.Float())
+			log.Debugln(index, candle)
+			record.Operate(techan.Order{
+				Side:          techan.BUY,
+				Security:      symbol,
+				Price:         candle.ClosePrice,
+				Amount:        CalculateAmount(big.NewDecimal(risk), candle.ClosePrice, big.NewFromInt(leverage)),
+				ExecutionTime: candle.Period.Start,
+			})
+		} else if record.CurrentPosition().IsLong() && long.ShouldExit(series.LastIndex(), record) {
+			log.Debugf("exiting at price: %f", candle.ClosePrice.Float())
+			log.Debugln(index, candle)
+			record.Operate(techan.Order{
+				Side:          techan.SELL,
+				Security:      symbol,
+				Price:         candle.ClosePrice,
+				Amount:        record.CurrentPosition().EntranceOrder().Amount,
+				ExecutionTime: candle.Period.Start,
+			})
+		}
+		index++
+	}
+	return series, record
+}
+
+func CalculateAmount(total big.Decimal, price big.Decimal, leverage big.Decimal) big.Decimal {
+	amount := total.Div(price.Div(leverage)).Float()
+	return big.NewDecimal(math.Floor(amount*1000) / 1000)
+}
+
+func cryptoCandleGenerator(input io.Reader, count int) (candleC chan *techan.Candle, err error) {
 	candleC = make(chan *techan.Candle)
-	dec := json.NewDecoder(input)
-	_, err = dec.Token()
+	b, err := ioutil.ReadAll(input)
 	if err != nil {
 		return nil, err
 	}
+	data := make([]*binance.Kline, 0)
+	if err := json.Unmarshal(b, &data); err != nil {
+		return nil, err
+	}
+	data = data[len(data)-count:]
 	go func() {
 		defer close(candleC)
 
-		for dec.More() {
-			var candle binance.Kline
-			err := dec.Decode(&candle)
-			if err != nil {
-				return
-			}
+		c := 0
+		for _, candle := range data {
 			data := &techan.Candle{
 				Period: techan.TimePeriod{
 					Start: time.Unix(candle.OpenTime/1e3, (candle.OpenTime%1e3)*1e3),
@@ -170,38 +197,10 @@ func cryptoCandleGenerator(input io.Reader) (candleC chan *techan.Candle, err er
 			// ticker := time.NewTicker(2 * time.Second)
 			// <-ticker.C
 			candleC <- data
+			c++
 		}
 	}()
 	return candleC, nil
-}
-
-// LogTradesAnalysis is a wrapper around an io.Writer, which logs every trade executed to that writer
-type LogTradesAnalysis struct {
-	io.Writer
-}
-
-// Analyze logs trades to provided io.Writer
-func (lta LogTradesAnalysis) Analyze(record *techan.TradingRecord) float64 {
-	var profit big.Decimal
-	logOrder := func(trade *techan.Position) {
-		if trade.IsShort() {
-			fmt.Fprintln(lta.Writer, fmt.Sprintf("%s - enter with sell %s (%s @ $%s)", trade.EntranceOrder().ExecutionTime.UTC().Format(time.RFC822), trade.EntranceOrder().Security, trade.EntranceOrder().Amount, trade.EntranceOrder().Price))
-			fmt.Fprintln(lta.Writer, fmt.Sprintf("%s - exit with buy %s (%s @ $%s)", trade.ExitOrder().ExecutionTime.UTC().Format(time.RFC822), trade.ExitOrder().Security, trade.ExitOrder().Amount, trade.ExitOrder().Price))
-			profit = trade.ExitValue().Sub(trade.CostBasis()).Neg()
-		} else {
-			fmt.Fprintln(lta.Writer, fmt.Sprintf("%s - enter with buy %s (%s @ $%s)", trade.EntranceOrder().ExecutionTime.UTC().Format(time.RFC822), trade.EntranceOrder().Security, trade.EntranceOrder().Amount, trade.EntranceOrder().Price))
-			fmt.Fprintln(lta.Writer, fmt.Sprintf("%s - exit with sell %s (%s @ $%s)", trade.ExitOrder().ExecutionTime.UTC().Format(time.RFC822), trade.ExitOrder().Security, trade.ExitOrder().Amount, trade.ExitOrder().Price))
-			profit = trade.ExitValue().Sub(trade.CostBasis())
-		}
-		fmt.Fprintln(lta.Writer, fmt.Sprintf("Profit: $%s", profit))
-	}
-
-	for _, trade := range record.Trades {
-		if trade.IsClosed() {
-			logOrder(trade)
-		}
-	}
-	return 0.0
 }
 
 func init() {
