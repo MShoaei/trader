@@ -1,13 +1,11 @@
 package server
 
 import (
-	"github.com/adshao/go-binance/v2"
 	"github.com/gin-gonic/gin"
 )
 
 type Server struct {
-	client *binance.Client
-	api    *gin.Engine
+	api *gin.Engine
 }
 
 func NewServer() *Server {
@@ -18,7 +16,7 @@ func NewServer() *Server {
 }
 
 func (s *Server) Run() {
-	s.api.Run(":9090")
+	s.api.Run()
 }
 
 func fail(c *gin.Context, code int, err error) {

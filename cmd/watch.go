@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"os"
+	"time"
 
 	"github.com/MShoaei/trader/internals"
 	"github.com/adshao/go-binance/v2"
@@ -32,7 +33,6 @@ func NewWatchCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			interruptCh := make(chan os.Signal, 1)
 			w := internals.Watchdog{
-				Client:     client,
 				Symbol:     symbol,
 				Interval:   interval,
 				Risk:       risk,
@@ -42,7 +42,28 @@ func NewWatchCommand() *cobra.Command {
 
 				InterruptCh: interruptCh,
 			}
-			return w.Watch()
+			wsKlineHandler, errHandler, err := w.Watch(client)
+			if err != nil {
+				return err
+			}
+			t := time.NewTicker(23 * time.Hour)
+			defer t.Stop()
+		loop:
+			doneC, stopC, err := binance.WsKlineServe(w.Symbol, w.Interval, wsKlineHandler, errHandler)
+			if err != nil {
+				return err
+			}
+
+			select {
+			case <-doneC:
+				return nil
+			case <-t.C:
+				close(stopC)
+				goto loop
+			case <-w.InterruptCh:
+				close(stopC)
+			}
+			return nil
 		},
 	}
 	f := cmd.Flags()

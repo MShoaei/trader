@@ -3,10 +3,8 @@ package internals
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"math"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/MShoaei/techan"
@@ -15,21 +13,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-type ID string
-
-func NewID(symbol string, interval string) ID {
-	return ID(symbol + "-" + interval)
-}
-
-func (id ID) GetSymbol() string {
-	return strings.Split(string(id), "-")[0]
-}
-
-func (id ID) GetInterval() string {
-	return strings.Split(string(id), "-")[1]
-}
-
-var watchdogs = make(map[ID]*Watchdog, 20)
+// var watchdogs = make(map[ID]*Watchdog, 20)
 
 func createTimeSeries(klines []*binance.Kline) (series *techan.TimeSeries) {
 	series = techan.NewTimeSeries()
@@ -70,7 +54,6 @@ func calculateAmount(total big.Decimal, price big.Decimal, leverage big.Decimal)
 }
 
 type Watchdog struct {
-	Client     *binance.Client `json:"-"`
 	Symbol     string
 	Interval   string
 	Risk       float64
@@ -85,13 +68,13 @@ type Watchdog struct {
 	InterruptCh chan os.Signal
 }
 
-func (w *Watchdog) Watch() error {
+func (w *Watchdog) Watch(client *binance.Client) (binance.WsKlineHandler, binance.ErrHandler, error) {
 	record := techan.NewTradingRecord()
 	w.records = record
 
 	series, err := getKlines(w.Symbol, w.Interval, 1000)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	w.series = series
 
@@ -101,16 +84,16 @@ func (w *Watchdog) Watch() error {
 
 	index := 0
 	wsKlineHandler := func(event *binance.WsKlineEvent) {
-		log.Debugln(event)
-		if !event.Kline.IsFinal {
-			return
-		}
 		newCandle.OpenPrice = big.NewFromString(event.Kline.Open)
 		newCandle.ClosePrice = big.NewFromString(event.Kline.Close)
 		newCandle.MaxPrice = big.NewFromString(event.Kline.High)
 		newCandle.MinPrice = big.NewFromString(event.Kline.Low)
 		newCandle.Volume = big.NewFromString(event.Kline.Volume)
 		newCandle.TradeCount = uint(event.Kline.TradeNum)
+		log.Debugln(event)
+		if !event.Kline.IsFinal {
+			return
+		}
 		if long.ShouldEnter(series.LastIndex(), record) {
 			log.Infof("entering at price: %s", newCandle.ClosePrice.FormattedString(2))
 
@@ -120,11 +103,11 @@ func (w *Watchdog) Watch() error {
 				Side:          techan.BUY,
 				Security:      w.Symbol,
 				Price:         newCandle.ClosePrice,
-				Amount:        quantity,
+				Amount:        quantity.Sub(quantity.Mul(big.NewDecimal(w.Commission))),
 				ExecutionTime: time.Now(),
 			})
 			if !w.Demo {
-				resp, err := w.Client.NewCreateOrderService().
+				resp, err := client.NewCreateOrderService().
 					Symbol(w.Symbol).
 					Side(binance.SideTypeBuy).
 					Type(binance.OrderTypeLimit).
@@ -144,11 +127,11 @@ func (w *Watchdog) Watch() error {
 				Side:          techan.SELL,
 				Security:      w.Symbol,
 				Price:         newCandle.ClosePrice,
-				Amount:        record.CurrentPosition().EntranceOrder().Amount.Sub(record.CurrentPosition().EntranceOrder().Amount.Mul(big.NewDecimal(0.0001))),
+				Amount:        record.CurrentPosition().EntranceOrder().Amount,
 				ExecutionTime: time.Now(),
 			})
 			if !w.Demo {
-				resp, err := w.Client.NewCreateOrderService().
+				resp, err := client.NewCreateOrderService().
 					Symbol(w.Symbol).
 					Side(binance.SideTypeSell).
 					Type(binance.OrderTypeLimit).
@@ -162,31 +145,15 @@ func (w *Watchdog) Watch() error {
 		}
 		newCandle = techan.NewCandle(newCandle.Period.Advance(1))
 		if success := series.AddCandle(newCandle); !success {
-			log.Fatalln("failed to add candle")
+			log.Errorln("failed to add candle")
 		}
 		log.Debugln(event)
 		index++
 	}
 	errHandler := func(err error) {
-		log.Info(err)
+		log.Error(err)
 	}
-	doneC, stopC, err := binance.WsKlineServe(w.Symbol, w.Interval, wsKlineHandler, errHandler)
-	if err != nil {
-		return err
-	}
-	w.StopC = stopC
-
-	id := NewID(w.Symbol, w.Interval)
-	watchdogs[id] = w
-
-	select {
-	case <-doneC:
-		delete(watchdogs, id)
-	case <-w.InterruptCh:
-		w.StopC <- struct{}{}
-		delete(watchdogs, id)
-	}
-	return nil
+	return wsKlineHandler, errHandler, nil
 }
 
 type Report struct {
@@ -205,32 +172,6 @@ func (w *Watchdog) Report() Report {
 		TradeCount:           techan.NumTradesAnalysis{}.Analyze(w.records),
 		ProfitableTradeCount: ProfitableTradesAnalysis{}.Analyze(w.records),
 	}
-}
-
-func GetWatchdog(symbol string, interval string) (*Watchdog, bool) {
-	id := NewID(symbol, interval)
-	w, ok := watchdogs[id]
-	return w, ok
-}
-
-func DeleteWatchdog(symbol string, interval string) (bool, error) {
-	id := NewID(symbol, interval)
-	w, ok := watchdogs[id]
-	if !ok {
-		return false, nil
-	}
-	t := time.NewTimer(2 * time.Second)
-	select {
-	case w.StopC <- struct{}{}:
-		break
-	case <-t.C:
-		if !t.Stop() {
-			<-t.C
-		}
-		return false, fmt.Errorf("failed to stop the watchdog")
-	}
-	delete(watchdogs, id)
-	return true, nil
 }
 
 func (w Watchdog) MarshalJSON() ([]byte, error) {

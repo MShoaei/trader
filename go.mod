@@ -5,6 +5,7 @@ go 1.16
 require (
 	github.com/MShoaei/techan v0.14.0
 	github.com/adshao/go-binance/v2 v2.2.1
+	github.com/appleboy/gin-jwt/v2 v2.6.4
 	github.com/fsnotify/fsnotify v1.4.9 // indirect
 	github.com/gin-gonic/gin v1.7.1
 	github.com/gorilla/websocket v1.4.2

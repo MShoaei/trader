@@ -5,11 +5,14 @@ import "github.com/gin-gonic/gin"
 func (s *Server) InitAPI() {
 	r := gin.Default()
 
+	authMiddleware := NewJWTMiddleware()
+	r.POST("/register", s.Register)
+	r.POST("/login", authMiddleware.LoginHandler)
+
+	r.Use(authMiddleware.MiddlewareFunc())
+
 	r.GET("/positions")
 	r.GET("/position/:symbol/:interval")
-
-	r.GET("/config", s.GetConfig)
-	r.POST("/config", s.SetConfig)
 
 	r.GET("/watchdogs")
 	r.GET("/watchdog/:symbol/:interval", s.GetWatchdog)
