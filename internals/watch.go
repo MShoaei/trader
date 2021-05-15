@@ -112,6 +112,7 @@ func (w *Watchdog) Watch(client *binance.Client) (binance.WsKlineHandler, binanc
 					Side(binance.SideTypeBuy).
 					Type(binance.OrderTypeLimit).
 					Quantity(quantity.String()).
+					TimeInForce(binance.TimeInForceTypeGTC).
 					Price(newCandle.ClosePrice.String()).Do(context.Background())
 				if err != nil {
 					log.Fatalf("sell failed: %v", err)
