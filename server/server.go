@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"log"
+	"os"
 
 	"github.com/adshao/go-binance/v2"
 	"github.com/gin-gonic/gin"
@@ -35,7 +36,10 @@ func NewServer() *Server {
 }
 
 func (s *Server) Run() {
-	s.api.Run()
+	if os.Getenv("PORT") == "" {
+		log.Fatal("PORT environment variable must be defined")
+	}
+	s.api.Run("127.0.0.1:" + os.Getenv("PORT"))
 }
 
 func fail(c *gin.Context, code int, err error) {
