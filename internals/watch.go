@@ -53,7 +53,7 @@ func calculateAmount(total big.Decimal, price big.Decimal, leverage big.Decimal,
 	amount := total.Div(price.Div(leverage)).Float()
 	min, _ := strconv.ParseFloat(filter.MinQuantity, 64)
 	step, _ := strconv.ParseFloat(filter.StepSize, 64)
-	rem := math.Remainder(amount-min, step)
+	rem := math.Abs(math.Remainder(amount-min, step))
 
 	return big.NewDecimal(amount - rem)
 }
@@ -65,7 +65,7 @@ type Watchdog struct {
 	Commission float64
 	Leverage   int
 	Demo       bool
-	Filter     *binance.LotSizeFilter
+	SymbolInfo binance.Symbol
 
 	series  *techan.TimeSeries
 	records *techan.TradingRecord
@@ -104,7 +104,7 @@ func (w *Watchdog) Watch(client *binance.Client) (binance.WsKlineHandler, binanc
 			log.Infof("entering at price: %s", newCandle.ClosePrice.FormattedString(2))
 
 			log.Debugln(index, newCandle)
-			quantity := calculateAmount(big.NewDecimal(w.Risk), newCandle.ClosePrice, big.NewFromInt(w.Leverage), w.Filter)
+			quantity := calculateAmount(big.NewDecimal(w.Risk), newCandle.ClosePrice, big.NewFromInt(w.Leverage), w.SymbolInfo.LotSizeFilter())
 			record.Operate(techan.Order{
 				Side:          techan.BUY,
 				Security:      w.Symbol,
@@ -113,23 +113,23 @@ func (w *Watchdog) Watch(client *binance.Client) (binance.WsKlineHandler, binanc
 				ExecutionTime: time.Now(),
 			})
 			if !w.Demo {
-				resp, err := client.NewCreateOrderService().
+				resp := client.NewCreateOrderService().
 					Symbol(w.Symbol).
 					Side(binance.SideTypeBuy).
 					Type(binance.OrderTypeLimit).
 					Quantity(quantity.String()).
 					TimeInForce(binance.TimeInForceTypeGTC).
-					Price(newCandle.ClosePrice.String()).Do(context.Background())
-				if err != nil {
-					log.Fatalf("buy failed: %v", err)
-				}
+					Price(newCandle.ClosePrice.FormattedString(w.SymbolInfo.QuotePrecision)).Test(context.Background())
+				// if err != nil {
+				// 	log.Fatalf("buy failed: %v", err)
+				// }
 				log.Info(resp)
 			}
 		} else if long.ShouldExit(series.LastIndex(), record) {
 			log.Infof("exiting at price: %s", newCandle.ClosePrice.FormattedString(2))
 
 			log.Debugln(index, newCandle)
-			quantity := calculateAmount(big.NewDecimal(w.Risk), newCandle.ClosePrice, big.NewFromInt(w.Leverage), w.Filter)
+			quantity := calculateAmount(big.NewDecimal(w.Risk), newCandle.ClosePrice, big.NewFromInt(w.Leverage), w.SymbolInfo.LotSizeFilter())
 			record.Operate(techan.Order{
 				Side:          techan.SELL,
 				Security:      w.Symbol,
@@ -138,16 +138,16 @@ func (w *Watchdog) Watch(client *binance.Client) (binance.WsKlineHandler, binanc
 				ExecutionTime: time.Now(),
 			})
 			if !w.Demo {
-				resp, err := client.NewCreateOrderService().
+				resp := client.NewCreateOrderService().
 					Symbol(w.Symbol).
 					Side(binance.SideTypeSell).
 					Type(binance.OrderTypeLimit).
 					Quantity(quantity.String()).
 					TimeInForce(binance.TimeInForceTypeGTC).
-					Price(newCandle.ClosePrice.String()).Do(context.Background())
-				if err != nil {
-					log.Fatalf("sell failed: %v", err)
-				}
+					Price(newCandle.ClosePrice.FormattedString(w.SymbolInfo.QuotePrecision)).Test(context.Background())
+				// if err != nil {
+				// 	log.Fatalf("sell failed: %v", err)
+				// }
 				log.Info(resp)
 			}
 		}

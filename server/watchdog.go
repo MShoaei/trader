@@ -36,7 +36,6 @@ func (s *Server) CreateWatchdog(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, fmt.Errorf("this should never happen either :)"))
 		return
 	}
-	log.Info(user.Watchdogs)
 
 	created := make([]string, 0, len(data))
 	exists := make([]string, 0, len(data))
@@ -57,15 +56,15 @@ func (s *Server) CreateWatchdog(c *gin.Context) {
 			Leverage:   d.Leverage,
 			Commission: d.Commission * 0.01,
 			Demo:       d.Demo,
-			Filter:     s.info.Symbols[filterIndex].LotSizeFilter(),
+			SymbolInfo: s.info.Symbols[filterIndex],
 
 			InterruptCh: interruptCh,
 		}
-		wsKlineHandler, errHandler, err := w.Watch(user.Client)
-		if err != nil {
-			log.Error(err)
-		}
 		go func() {
+			wsKlineHandler, errHandler, err := w.Watch(user.Client)
+			if err != nil {
+				log.Error(err)
+			}
 			id := NewWatchdogID(w.Symbol, w.Interval)
 			user.Watchdogs[id] = w
 
