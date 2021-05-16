@@ -46,6 +46,10 @@ func (s *Server) CreateWatchdog(c *gin.Context) {
 			continue
 		}
 		interruptCh := make(chan os.Signal, 1)
+		filterIndex, ok := s.index[d.Symbol]
+		if !ok {
+			log.Errorf("filter for %s not found", d.Symbol)
+		}
 		w := &internals.Watchdog{
 			Symbol:     d.Symbol,
 			Interval:   d.Interval,
@@ -53,6 +57,7 @@ func (s *Server) CreateWatchdog(c *gin.Context) {
 			Leverage:   d.Leverage,
 			Commission: d.Commission * 0.01,
 			Demo:       d.Demo,
+			Filter:     s.info.Symbols[filterIndex].LotSizeFilter(),
 
 			InterruptCh: interruptCh,
 		}

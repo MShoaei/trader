@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"math"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/MShoaei/techan"
@@ -48,9 +49,13 @@ func getKlines(symbol, interval string, limit int) (*techan.TimeSeries, error) {
 	return createTimeSeries(klines), nil
 }
 
-func calculateAmount(total big.Decimal, price big.Decimal, leverage big.Decimal) big.Decimal {
+func calculateAmount(total big.Decimal, price big.Decimal, leverage big.Decimal, filter *binance.LotSizeFilter) big.Decimal {
 	amount := total.Div(price.Div(leverage)).Float()
-	return big.NewDecimal(math.Floor(amount*1000) / 1000)
+	min, _ := strconv.ParseFloat(filter.MinQuantity, 64)
+	step, _ := strconv.ParseFloat(filter.StepSize, 64)
+	rem := math.Remainder(amount-min, step)
+
+	return big.NewDecimal(amount - rem)
 }
 
 type Watchdog struct {
@@ -60,6 +65,7 @@ type Watchdog struct {
 	Commission float64
 	Leverage   int
 	Demo       bool
+	Filter     *binance.LotSizeFilter
 
 	series  *techan.TimeSeries
 	records *techan.TradingRecord
@@ -98,7 +104,7 @@ func (w *Watchdog) Watch(client *binance.Client) (binance.WsKlineHandler, binanc
 			log.Infof("entering at price: %s", newCandle.ClosePrice.FormattedString(2))
 
 			log.Debugln(index, newCandle)
-			quantity := calculateAmount(big.NewDecimal(w.Risk), newCandle.ClosePrice, big.NewFromInt(w.Leverage))
+			quantity := calculateAmount(big.NewDecimal(w.Risk), newCandle.ClosePrice, big.NewFromInt(w.Leverage), w.Filter)
 			record.Operate(techan.Order{
 				Side:          techan.BUY,
 				Security:      w.Symbol,
@@ -115,7 +121,7 @@ func (w *Watchdog) Watch(client *binance.Client) (binance.WsKlineHandler, binanc
 					TimeInForce(binance.TimeInForceTypeGTC).
 					Price(newCandle.ClosePrice.String()).Do(context.Background())
 				if err != nil {
-					log.Fatalf("sell failed: %v", err)
+					log.Fatalf("buy failed: %v", err)
 				}
 				log.Info(resp)
 			}
@@ -123,7 +129,7 @@ func (w *Watchdog) Watch(client *binance.Client) (binance.WsKlineHandler, binanc
 			log.Infof("exiting at price: %s", newCandle.ClosePrice.FormattedString(2))
 
 			log.Debugln(index, newCandle)
-			quantity := calculateAmount(big.NewDecimal(w.Risk), newCandle.ClosePrice, big.NewFromInt(w.Leverage))
+			quantity := calculateAmount(big.NewDecimal(w.Risk), newCandle.ClosePrice, big.NewFromInt(w.Leverage), w.Filter)
 			record.Operate(techan.Order{
 				Side:          techan.SELL,
 				Security:      w.Symbol,
