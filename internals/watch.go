@@ -113,16 +113,16 @@ func (w *Watchdog) Watch(client *binance.Client) (binance.WsKlineHandler, binanc
 				ExecutionTime: time.Now(),
 			})
 			if !w.Demo {
-				resp := client.NewCreateOrderService().
+				resp, err := client.NewCreateOrderService().
 					Symbol(w.Symbol).
 					Side(binance.SideTypeBuy).
 					Type(binance.OrderTypeLimit).
 					Quantity(quantity.String()).
 					TimeInForce(binance.TimeInForceTypeGTC).
-					Price(newCandle.ClosePrice.FormattedString(w.SymbolInfo.QuotePrecision)).Test(context.Background())
-				// if err != nil {
-				// 	log.Fatalf("buy failed: %v", err)
-				// }
+					Price(newCandle.ClosePrice.FormattedString(w.SymbolInfo.QuotePrecision)).Do(context.Background())
+				if err != nil {
+					log.Fatalf("buy failed: %v", err)
+				}
 				log.Info(resp)
 			}
 		} else if long.ShouldExit(series.LastIndex(), record) {
@@ -138,16 +138,16 @@ func (w *Watchdog) Watch(client *binance.Client) (binance.WsKlineHandler, binanc
 				ExecutionTime: time.Now(),
 			})
 			if !w.Demo {
-				resp := client.NewCreateOrderService().
+				resp, err := client.NewCreateOrderService().
 					Symbol(w.Symbol).
 					Side(binance.SideTypeSell).
 					Type(binance.OrderTypeLimit).
 					Quantity(quantity.String()).
 					TimeInForce(binance.TimeInForceTypeGTC).
-					Price(newCandle.ClosePrice.FormattedString(w.SymbolInfo.QuotePrecision)).Test(context.Background())
-				// if err != nil {
-				// 	log.Fatalf("sell failed: %v", err)
-				// }
+					Price(newCandle.ClosePrice.FormattedString(w.SymbolInfo.QuotePrecision)).Do(context.Background())
+				if err != nil {
+					log.Fatalf("sell failed: %v", err)
+				}
 				log.Info(resp)
 			}
 		}
