@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/MShoaei/trader/internals"
+	"github.com/MShoaei/trader/internal"
 	"github.com/adshao/go-binance/v2"
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
@@ -49,7 +49,7 @@ func (s *Server) CreateWatchdog(c *gin.Context) {
 		if !ok {
 			log.Errorf("filter for %s not found", d.Symbol)
 		}
-		w := &internals.Watchdog{
+		w := &internal.Watchdog{
 			Symbol:     d.Symbol,
 			Interval:   d.Interval,
 			Risk:       d.Risk,

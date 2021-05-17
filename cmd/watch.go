@@ -4,7 +4,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/MShoaei/trader/internals"
+	"github.com/MShoaei/trader/internal"
 	"github.com/adshao/go-binance/v2"
 	"github.com/spf13/cobra"
 )
@@ -32,7 +32,7 @@ func NewWatchCommand() *cobra.Command {
 		Short: "watch watches the market and places order when the conditions are true",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			interruptCh := make(chan os.Signal, 1)
-			w := internals.Watchdog{
+			w := internal.Watchdog{
 				Symbol:     symbol,
 				Interval:   interval,
 				Risk:       risk,

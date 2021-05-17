@@ -1,4 +1,4 @@
-package internals
+package internal
 
 import (
 	"context"
@@ -92,7 +92,6 @@ func (w *Watchdog) Watch(client *binance.Client) (binance.WsKlineHandler, binanc
 
 	newCandle := series.LastCandle()
 
-	index := 0
 	wsKlineHandler := func(event *binance.WsKlineEvent) {
 		newCandle.OpenPrice = big.NewFromString(event.Kline.Open)
 		newCandle.ClosePrice = big.NewFromString(event.Kline.Close)
@@ -105,10 +104,35 @@ func (w *Watchdog) Watch(client *binance.Client) (binance.WsKlineHandler, binanc
 			return
 		}
 		if long.ShouldEnter(series.LastIndex(), record) {
-			log.Infof("%s entering at price: %s", w.Symbol, newCandle.ClosePrice.FormattedString(2))
-
-			log.Debugln(index, newCandle)
+			var (
+				// resp *binance.CreateOrderResponse
+				err error
+			)
 			quantity := calculateAmount(big.NewDecimal(w.Risk), newCandle.ClosePrice, big.NewFromInt(w.Leverage), w.SymbolInfo.LotSizeFilter())
+			price := newCandle.ClosePrice.FormattedString(w.SymbolInfo.QuotePrecision)
+			if !w.Demo {
+				_, err = client.NewCreateOrderService().
+					Symbol(w.Symbol).
+					Side(binance.SideTypeBuy).
+					Type(binance.OrderTypeLimit).
+					Quantity(quantity.String()).
+					TimeInForce(binance.TimeInForceTypeGTC).
+					Price(price).
+					Do(context.Background())
+			} else {
+				err = client.NewCreateOrderService().
+					Symbol(w.Symbol).
+					Side(binance.SideTypeBuy).
+					Type(binance.OrderTypeLimit).
+					Quantity(quantity.String()).
+					TimeInForce(binance.TimeInForceTypeGTC).
+					Price(price).
+					Test(context.Background())
+				log.Infof("%s buy: %v", w.Symbol, err)
+			}
+			if err != nil {
+				log.Errorf("%s, Qty: %s, Price: %s", w.Symbol, quantity.String(), price)
+			}
 			record.Operate(techan.Order{
 				Side:          techan.BUY,
 				Security:      w.Symbol,
@@ -116,75 +140,52 @@ func (w *Watchdog) Watch(client *binance.Client) (binance.WsKlineHandler, binanc
 				Amount:        quantity.Sub(quantity.Mul(big.NewDecimal(w.Commission))),
 				ExecutionTime: time.Now(),
 			})
-			if !w.Demo {
-				resp, err := client.NewCreateOrderService().
-					Symbol(w.Symbol).
-					Side(binance.SideTypeBuy).
-					Type(binance.OrderTypeLimit).
-					Quantity(quantity.String()).
-					TimeInForce(binance.TimeInForceTypeGTC).
-					Price(newCandle.ClosePrice.FormattedString(w.SymbolInfo.QuotePrecision)).Do(context.Background())
-				if err != nil {
-					log.Fatalf("%s buy failed: %v", w.Symbol, err)
-				}
-				log.Info(resp)
-			} else {
-				err := client.NewCreateOrderService().
-					Symbol(w.Symbol).
-					Side(binance.SideTypeBuy).
-					Type(binance.OrderTypeLimit).
-					Quantity(quantity.String()).
-					TimeInForce(binance.TimeInForceTypeGTC).
-					Price(newCandle.ClosePrice.FormattedString(w.SymbolInfo.QuotePrecision)).Test(context.Background())
-				log.Infof("%s buy: %v", w.Symbol, err)
-				if err != nil {
-					log.Errorf("%s, Qty: %s, Price: %s", w.Symbol, quantity.String(), newCandle.ClosePrice.FormattedString(w.SymbolInfo.QuotePrecision))
-				}
-			}
+			log.Infof("%s entering at price: %s", w.Symbol, price)
 		} else if long.ShouldExit(series.LastIndex(), record) {
-			log.Infof("exiting at price: %s", newCandle.ClosePrice.FormattedString(2))
-
-			log.Debugln(index, newCandle)
+			var (
+				// resp *binance.CreateOrderResponse
+				err error
+			)
 			quantity := calculateAmount(big.NewDecimal(w.Risk), newCandle.ClosePrice, big.NewFromInt(w.Leverage), w.SymbolInfo.LotSizeFilter())
+			price := newCandle.ClosePrice.FormattedString(w.SymbolInfo.QuotePrecision)
+			if !w.Demo {
+				_, err = client.NewCreateOrderService().
+					Symbol(w.Symbol).
+					Side(binance.SideTypeSell).
+					Type(binance.OrderTypeLimit).
+					Quantity(quantity.String()).
+					TimeInForce(binance.TimeInForceTypeGTC).
+					Price(price).
+					Do(context.Background())
+			} else {
+				err = client.NewCreateOrderService().
+					Symbol(w.Symbol).
+					Side(binance.SideTypeSell).
+					Type(binance.OrderTypeLimit).
+					Quantity(quantity.String()).
+					TimeInForce(binance.TimeInForceTypeGTC).
+					Price(price).
+					Test(context.Background())
+			}
+			log.Infof("%s sell: %v", w.Symbol, err)
+			if err != nil {
+				log.Errorf("%s, Qty: %s, Price: %s", w.Symbol, quantity.String(), price)
+				return
+			}
 			record.Operate(techan.Order{
 				Side:          techan.SELL,
 				Security:      w.Symbol,
 				Price:         newCandle.ClosePrice,
-				Amount:        record.CurrentPosition().EntranceOrder().Amount,
+				Amount:        quantity,
 				ExecutionTime: time.Now(),
 			})
-			if !w.Demo {
-				resp, err := client.NewCreateOrderService().
-					Symbol(w.Symbol).
-					Side(binance.SideTypeSell).
-					Type(binance.OrderTypeLimit).
-					Quantity(quantity.String()).
-					TimeInForce(binance.TimeInForceTypeGTC).
-					Price(newCandle.ClosePrice.FormattedString(w.SymbolInfo.QuotePrecision)).Do(context.Background())
-				if err != nil {
-					log.Fatalf("sell failed: %v", err)
-				}
-				log.Info(resp)
-			} else {
-				err := client.NewCreateOrderService().
-					Symbol(w.Symbol).
-					Side(binance.SideTypeSell).
-					Type(binance.OrderTypeLimit).
-					Quantity(quantity.String()).
-					TimeInForce(binance.TimeInForceTypeGTC).
-					Price(newCandle.ClosePrice.FormattedString(w.SymbolInfo.QuotePrecision)).Test(context.Background())
-				log.Infof("%s sell: %v", w.Symbol, err)
-				if err != nil {
-					log.Errorf("%s, Qty: %s, Price: %s", w.Symbol, quantity.String(), newCandle.ClosePrice.FormattedString(w.SymbolInfo.QuotePrecision))
-				}
-			}
+			log.Infof("%s exiting at price: %s", w.Symbol, price)
 		}
 		newCandle = techan.NewCandle(newCandle.Period.Advance(1))
 		if success := series.AddCandle(newCandle); !success {
 			log.Errorln("failed to add candle")
 		}
 		log.Debugln(event)
-		index++
 	}
 	errHandler := func(err error) {
 		log.Error(err)

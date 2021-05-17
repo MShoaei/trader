@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/MShoaei/techan"
-	"github.com/MShoaei/trader/internals"
+	"github.com/MShoaei/trader/internal"
 	"github.com/adshao/go-binance/v2"
 	"github.com/sdcoffey/big"
 	log "github.com/sirupsen/logrus"
@@ -72,22 +72,22 @@ func newCryptoCommand() *cobra.Command {
 			var series *techan.TimeSeries
 			switch strategy {
 			case 0:
-				series, record = RunDynamicStrategy(internals.CreateBollingerStochStrategy, candleC, symbol, risk, leverage)
+				series, record = RunDynamicStrategy(internal.CreateBollingerStochStrategy, candleC, symbol, risk, leverage)
 			case 1:
-				series, record = RunDynamicStrategy(internals.CreateMACDStrategy, candleC, symbol, risk, leverage)
+				series, record = RunDynamicStrategy(internal.CreateMACDStrategy, candleC, symbol, risk, leverage)
 			case 2:
-				series, record = RunDynamicStrategy(internals.CreateEMAStrategy, candleC, symbol, risk, leverage)
+				series, record = RunDynamicStrategy(internal.CreateEMAStrategy, candleC, symbol, risk, leverage)
 			case 3:
-				series, record = RunDynamicStrategy(internals.CreateIchimokuStrategy, candleC, symbol, risk, leverage)
+				series, record = RunDynamicStrategy(internal.CreateIchimokuStrategy, candleC, symbol, risk, leverage)
 			default:
 				return fmt.Errorf("invalid strategy")
 			}
 
 			totalProfit := techan.TotalProfitAnalysis{}.Analyze(record)
-			commissionValue := internals.CommissionAnalysis{Commission: commission}.Analyze(record)
-			openPL := internals.OpenPLAnalysis{LastCandle: series.LastCandle()}.Analyze(record)
+			commissionValue := internal.CommissionAnalysis{Commission: commission}.Analyze(record)
+			openPL := internal.OpenPLAnalysis{LastCandle: series.LastCandle()}.Analyze(record)
 			tradeCount := techan.NumTradesAnalysis{}.Analyze(record)
-			profitableTradeCount := internals.ProfitableTradesAnalysis{}.Analyze(record)
+			profitableTradeCount := internal.ProfitableTradesAnalysis{}.Analyze(record)
 			log.Infof("Total profit: %f, Commission: %f, PNL: %f",
 				totalProfit,
 				commissionValue,
@@ -98,11 +98,11 @@ func newCryptoCommand() *cobra.Command {
 				int(profitableTradeCount),
 				(profitableTradeCount/tradeCount)*100,
 			)
-			log.Infof("Win streak: %d, Lose streak: %d", int(internals.WinStreakAnalysis{}.Analyze(record)), int(internals.LoseStreakAnalysis{}.Analyze(record)))
-			log.Infof("Max win: %f, Max loss: %f", internals.MaxWinAnalysis{}.Analyze(record), internals.MaxLossAnalysis{}.Analyze(record))
-			log.Infof("Average win: %f, Average loss: %f", internals.AverageWinAnalysis{}.Analyze(record), internals.AverageLossAnalysis{}.Analyze(record))
+			log.Infof("Win streak: %d, Lose streak: %d", int(internal.WinStreakAnalysis{}.Analyze(record)), int(internal.LoseStreakAnalysis{}.Analyze(record)))
+			log.Infof("Max win: %f, Max loss: %f", internal.MaxWinAnalysis{}.Analyze(record), internal.MaxLossAnalysis{}.Analyze(record))
+			log.Infof("Average win: %f, Average loss: %f", internal.AverageWinAnalysis{}.Analyze(record), internal.AverageLossAnalysis{}.Analyze(record))
 
-			internals.LogTradesAnalysis{
+			internal.LogTradesAnalysis{
 				Writer: analysisFile,
 			}.Analyze(record)
 			return nil
@@ -126,7 +126,7 @@ func newCryptoCommand() *cobra.Command {
 
 // RunDynamicStrategy runs the analysis using a strategy with dynamic exit rules.
 // A exit rule with fixed stop loss and/or take profit price is not a dynamic strategy.
-func RunDynamicStrategy(f internals.DynamicStrategyFunc, candleC chan *techan.Candle, symbol string, risk float64, leverage int) (*techan.TimeSeries, *techan.TradingRecord) {
+func RunDynamicStrategy(f internal.DynamicStrategyFunc, candleC chan *techan.Candle, symbol string, risk float64, leverage int) (*techan.TimeSeries, *techan.TradingRecord) {
 	series := techan.NewTimeSeries()
 	record := techan.NewTradingRecord()
 	long, _ := f(series)

@@ -6,14 +6,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/MShoaei/trader/internals"
+	"github.com/MShoaei/trader/internal"
 	"github.com/adshao/go-binance/v2"
 	"github.com/gin-gonic/gin"
 )
 
 type User struct {
 	Client    *binance.Client
-	Watchdogs map[ID]*internals.Watchdog
+	Watchdogs map[ID]*internal.Watchdog
 	APIKey    string
 	APISecret string
 }
@@ -34,7 +34,7 @@ func (s *Server) Register(c *gin.Context) {
 		return
 	}
 	allUsers[data.Key] = &User{
-		Watchdogs: make(map[ID]*internals.Watchdog, 100),
+		Watchdogs: make(map[ID]*internal.Watchdog, 100),
 		APIKey:    data.Key,
 		APISecret: data.Secret,
 	}
@@ -54,7 +54,7 @@ func (id ID) GetInterval() string {
 	return strings.Split(string(id), "-")[1]
 }
 
-func (u *User) GetWatchdog(symbol string, interval string) (*internals.Watchdog, bool) {
+func (u *User) GetWatchdog(symbol string, interval string) (*internal.Watchdog, bool) {
 	id := NewWatchdogID(symbol, interval)
 	w, ok := u.Watchdogs[id]
 	return w, ok
