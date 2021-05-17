@@ -21,6 +21,7 @@ func (s *Server) InitAPI() {
 	r.DELETE("/watchdog/:symbol/:interval", s.StopWatchdog)
 
 	r.GET("/watchdog/:symbol/:interval/analysis", s.GetWatchdogAnalysis)
+	r.GET("/watchdogs/analysis", s.GetTotalAnalysis)
 
 	s.api = r
 }
