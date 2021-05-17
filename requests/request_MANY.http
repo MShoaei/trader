@@ -3,8 +3,9 @@
 @apiSecret=LCv7s60DmNBM0pQ2FUl8NCGo3QWxgYE6TMsh20ZVKKUS8RDHCZaPUMKargwrMsN5
 @demoMode=true
 @contectType=application/json
-
 @token={{login.response.body.token}}
+@symbol=ETHUSDT
+@interval=1m
 
 ###
 
@@ -27,7 +28,7 @@ Authorization: Bearer {{token}}
 
 [
     {
-        "symbol": "ETHUSDT",
+        "symbol": "ADAUSDT",
         "interval": "1h",
         "risk": 15.0,
         "commission": 0.1,
@@ -35,6 +36,11 @@ Authorization: Bearer {{token}}
         "demo": {{demoMode}}
     }
 ]
+
+###
+
+DELETE http://{{host}}/watchdog/ADAUSDT/1h HTTP/1.1
+Authorization: Bearer {{token}}
 
 ###
 # @name createWatchdogs
@@ -42,10 +48,11 @@ Authorization: Bearer {{token}}
 POST http://{{host}}/watchdog HTTP/1.1
 Content-Type: {{contectType}}
 Authorization: Bearer {{token}}
+
 [
     {
         "symbol": "BTCUSDT",
-        "interval": "1h",
+        "interval": "{{interval}}",
         "risk": 15.0,
         "commission": 0.1,
         "leverage": 1,
@@ -53,7 +60,7 @@ Authorization: Bearer {{token}}
     },
     {
         "symbol": "ETHUSDT",
-        "interval": "1h",
+        "interval": "{{interval}}",
         "risk": 15.0,
         "commission": 0.1,
         "leverage": 1,
@@ -61,7 +68,23 @@ Authorization: Bearer {{token}}
     },
     {
         "symbol": "BNBUSDT",
-        "interval": "1h",
+        "interval": "{{interval}}",
+        "risk": 15.0,
+        "commission": 0.1,
+        "leverage": 1,
+        "demo": {{demoMode}}
+    },
+    {
+        "symbol": "NEOUSDT",
+        "interval": "{{interval}}",
+        "risk": 15.0,
+        "commission": 0.1,
+        "leverage": 1,
+        "demo": {{demoMode}}
+    },
+    {
+        "symbol": "LTCUSDT",
+        "interval": "{{interval}}",
         "risk": 15.0,
         "commission": 0.1,
         "leverage": 1,
@@ -69,7 +92,31 @@ Authorization: Bearer {{token}}
     },
     {
         "symbol": "ADAUSDT",
-        "interval": "1h",
+        "interval": "{{interval}}",
+        "risk": 15.0,
+        "commission": 0.1,
+        "leverage": 1,
+        "demo": {{demoMode}}
+    },
+    {
+        "symbol": "XRPUSDT",
+        "interval": "{{interval}}",
+        "risk": 15.0,
+        "commission": 0.1,
+        "leverage": 1,
+        "demo": {{demoMode}}
+    },
+    {
+        "symbol": "EOSUSDT",
+        "interval": "{{interval}}",
+        "risk": 15.0,
+        "commission": 0.1,
+        "leverage": 1,
+        "demo": {{demoMode}}
+    },
+    {
+        "symbol": "XLMUSDT",
+        "interval": "{{interval}}",
         "risk": 15.0,
         "commission": 0.1,
         "leverage": 1,
@@ -77,7 +124,55 @@ Authorization: Bearer {{token}}
     },
     {
         "symbol": "TRXUSDT",
-        "interval": "1h",
+        "interval": "{{interval}}",
+        "risk": 15.0,
+        "commission": 0.1,
+        "leverage": 1,
+        "demo": {{demoMode}}
+    },
+    {
+        "symbol": "QTUMUSDT",
+        "interval": "{{interval}}",
+        "risk": 15.0,
+        "commission": 0.1,
+        "leverage": 1,
+        "demo": {{demoMode}}
+    },
+    {
+        "symbol": "BTTUSDT",
+        "interval": "{{interval}}",
+        "risk": 15.0,
+        "commission": 0.1,
+        "leverage": 1,
+        "demo": {{demoMode}}
+    },
+    {
+        "symbol": "IOTAUSDT",
+        "interval": "{{interval}}",
+        "risk": 15.0,
+        "commission": 0.1,
+        "leverage": 1,
+        "demo": {{demoMode}}
+    },
+    {
+        "symbol": "ETCUSDT",
+        "interval": "{{interval}}",
+        "risk": 15.0,
+        "commission": 0.1,
+        "leverage": 1,
+        "demo": {{demoMode}}
+    },
+    {
+        "symbol": "ONTUSDT",
+        "interval": "{{interval}}",
+        "risk": 15.0,
+        "commission": 0.1,
+        "leverage": 1,
+        "demo": {{demoMode}}
+    },
+    {
+        "symbol": "ONEUSDT",
+        "interval": "{{interval}}",
         "risk": 15.0,
         "commission": 0.1,
         "leverage": 1,
@@ -87,5 +182,15 @@ Authorization: Bearer {{token}}
 
 ###
 
-DELETE http://{{host}}/watchdog/ETHUSDT/1h HTTP/1.1
+GET http://{{host}}/watchdog/{{symbol}}/1h HTTP/1.1
+Authorization: Bearer {{token}}
+
+###
+
+GET http://{{host}}/watchdog/{{symbol}}/1h/analysis HTTP/1.1
+Authorization: Bearer {{token}}
+
+###
+
+GET http://{{host}}/watchdogs/analysis HTTP/1.1
 Authorization: Bearer {{token}}
