@@ -15,6 +15,39 @@ type LogTradesAnalysis struct {
 	io.Writer
 }
 
+// TotalProfitAnalysis analyzes the trading record for total profit.
+type TotalProfitAnalysis struct {
+	Commission float64
+}
+
+// Analyze analyzes the trading record for total profit.
+func (tps TotalProfitAnalysis) Analyze(record *techan.TradingRecord) float64 {
+	totalProfit := big.NewDecimal(0)
+	for _, trade := range record.Trades {
+		if trade.IsClosed() {
+
+			amount := trade.EntranceOrder().Amount
+			realAmount := amount.Sub(amount.Mul(big.NewDecimal(tps.Commission * 0.01)))
+			closeCommission := trade.ExitValue().Mul(big.NewDecimal(tps.Commission * 0.01))
+
+			openValue := trade.CostBasis()
+			closeValue := realAmount.Mul(trade.ExitOrder().Price).Sub(closeCommission)
+
+			// costBasis := trade.CostBasis()
+			// exitValue := trade.ExitValue()
+
+			if trade.IsLong() {
+				totalProfit = totalProfit.Add(closeValue.Sub(openValue))
+			} else if trade.IsShort() {
+				totalProfit = totalProfit.Sub(closeValue.Sub(openValue))
+			}
+
+		}
+	}
+
+	return totalProfit.Float()
+}
+
 // Analyze logs trades to provided io.Writer
 func (lta LogTradesAnalysis) Analyze(record *techan.TradingRecord) float64 {
 	var profit big.Decimal
@@ -40,16 +73,23 @@ func (lta LogTradesAnalysis) Analyze(record *techan.TradingRecord) float64 {
 }
 
 // ProfitableTradesAnalysis analyzes the trading record for the number of profitable trades
-type ProfitableTradesAnalysis struct{}
+type ProfitableTradesAnalysis struct {
+	Commission float64
+}
 
 // Analyze returns the number of profitable trades in a trading record
 func (pta ProfitableTradesAnalysis) Analyze(record *techan.TradingRecord) float64 {
 	var profitableTrades int
-	for _, trade := range record.Trades {
-		costBasis := trade.EntranceOrder().Amount.Mul(trade.EntranceOrder().Price)
-		sellPrice := trade.ExitOrder().Amount.Mul(trade.ExitOrder().Price)
 
-		if (trade.IsLong() && sellPrice.GT(costBasis)) || (trade.IsShort() && sellPrice.LT(costBasis)) {
+	for _, trade := range record.Trades {
+		amount := trade.EntranceOrder().Amount
+		realAmount := amount.Sub(amount.Mul(big.NewDecimal(pta.Commission * 0.01)))
+		closeCommission := realAmount.Mul(trade.ExitOrder().Price).Mul(big.NewDecimal(pta.Commission * 0.01))
+
+		openValue := trade.CostBasis()
+		closeValue := realAmount.Mul(trade.ExitOrder().Price).Sub(closeCommission)
+
+		if (trade.IsLong() && closeValue.GT(openValue)) || (trade.IsShort() && closeValue.LT(openValue)) {
 			profitableTrades++
 		}
 	}
@@ -63,16 +103,21 @@ type CommissionAnalysis struct {
 
 // Analyze analyzes the trading record for the total commission cost.
 func (ca CommissionAnalysis) Analyze(record *techan.TradingRecord) float64 {
-	total := big.ZERO
+	total := big.NewDecimal(0)
 	for _, trade := range record.Trades {
-		total = total.Add(trade.CostBasis().Mul(big.NewDecimal(ca.Commission * 0.01)))
-		total = total.Add(trade.ExitValue().Mul(big.NewDecimal(ca.Commission * 0.01)))
+		amount := trade.EntranceOrder().Amount
+		commissionAmount := amount.Mul(big.NewDecimal(ca.Commission * 0.01))
+		total = total.Add(commissionAmount.Mul(trade.EntranceOrder().Price))
+
+		closeCommission := commissionAmount.Mul(trade.ExitOrder().Price).Mul(big.NewDecimal(ca.Commission * 0.01))
+		total = total.Add(closeCommission)
 	}
 	return total.Float()
 }
 
 type OpenPLAnalysis struct {
 	LastCandle *techan.Candle
+	Commission float64
 }
 
 func (o OpenPLAnalysis) Analyze(record *techan.TradingRecord) float64 {
@@ -82,10 +127,13 @@ func (o OpenPLAnalysis) Analyze(record *techan.TradingRecord) float64 {
 	var profit big.Decimal
 	trade := record.CurrentPosition()
 	amount := trade.EntranceOrder().Amount
+	realAmount := amount.Sub(amount.Mul(big.NewDecimal(o.Commission * 0.01)))
+
+	closeCommission := o.LastCandle.ClosePrice.Mul(realAmount).Mul(big.NewDecimal(o.Commission * 0.01))
 	if trade.IsShort() {
-		profit = o.LastCandle.ClosePrice.Mul(amount).Sub(trade.CostBasis()).Neg()
+		profit = o.LastCandle.ClosePrice.Mul(realAmount).Sub(trade.CostBasis()).Neg().Sub(closeCommission)
 	} else if trade.IsLong() {
-		profit = o.LastCandle.ClosePrice.Mul(amount).Sub(trade.CostBasis())
+		profit = o.LastCandle.ClosePrice.Mul(realAmount).Sub(trade.CostBasis()).Sub(closeCommission)
 	}
 	return profit.Float()
 }

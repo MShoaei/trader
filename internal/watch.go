@@ -50,9 +50,9 @@ func getKlines(symbol, interval string, limit int) (*techan.TimeSeries, error) {
 
 func calculateAmount(total big.Decimal, price big.Decimal, leverage big.Decimal, filter *binance.LotSizeFilter) big.Decimal {
 	amount := total.Div(price.Div(leverage))
-	str := amount.FormattedString(8)
+	str := amount.FormattedString(10)
 
-	return big.NewFromString(str[:len(str)-(8-precision(filter.StepSize))])
+	return big.NewFromString(str[:len(str)-(10-precision(filter.StepSize))])
 }
 
 func precision(number string) int {
@@ -60,6 +60,12 @@ func precision(number string) int {
 		return 0
 	}
 	return strings.IndexByte(number, '1') - 1
+}
+
+func cleanPrecision(num big.Decimal, precision int) string {
+	str := num.FormattedString(10)
+
+	return str[:len(str)-(10-precision)]
 }
 
 type Watchdog struct {
@@ -137,7 +143,7 @@ func (w *Watchdog) Watch(client *binance.Client) (binance.WsKlineHandler, binanc
 				Side:          techan.BUY,
 				Security:      w.Symbol,
 				Price:         newCandle.ClosePrice,
-				Amount:        quantity.Sub(quantity.Mul(big.NewDecimal(w.Commission))),
+				Amount:        quantity,
 				ExecutionTime: time.Now(),
 			})
 			log.Infof("%s entering at price: %s", w.Symbol, price)
@@ -146,14 +152,17 @@ func (w *Watchdog) Watch(client *binance.Client) (binance.WsKlineHandler, binanc
 				// resp *binance.CreateOrderResponse
 				err error
 			)
-			quantity := calculateAmount(big.NewDecimal(w.Risk), newCandle.ClosePrice, big.NewFromInt(w.Leverage), w.SymbolInfo.LotSizeFilter())
+			// quantity := calculateAmount(big.NewDecimal(w.Risk), newCandle.ClosePrice, big.NewFromInt(w.Leverage), w.SymbolInfo.LotSizeFilter())
+			openAmount := record.CurrentPosition().EntranceOrder().Amount
+			quantity := openAmount.Sub(openAmount.Mul(big.NewDecimal(w.Commission * 0.01)))
+			cleanQuantity := cleanPrecision(quantity, precision(w.SymbolInfo.LotSizeFilter().StepSize))
 			price := newCandle.ClosePrice.FormattedString(w.SymbolInfo.QuotePrecision)
 			if !w.Demo {
 				_, err = client.NewCreateOrderService().
 					Symbol(w.Symbol).
 					Side(binance.SideTypeSell).
 					Type(binance.OrderTypeLimit).
-					Quantity(quantity.String()).
+					Quantity(cleanQuantity).
 					TimeInForce(binance.TimeInForceTypeGTC).
 					Price(price).
 					Do(context.Background())
@@ -162,7 +171,7 @@ func (w *Watchdog) Watch(client *binance.Client) (binance.WsKlineHandler, binanc
 					Symbol(w.Symbol).
 					Side(binance.SideTypeSell).
 					Type(binance.OrderTypeLimit).
-					Quantity(quantity.String()).
+					Quantity(cleanQuantity).
 					TimeInForce(binance.TimeInForceTypeGTC).
 					Price(price).
 					Test(context.Background())
@@ -176,7 +185,7 @@ func (w *Watchdog) Watch(client *binance.Client) (binance.WsKlineHandler, binanc
 				Side:          techan.SELL,
 				Security:      w.Symbol,
 				Price:         newCandle.ClosePrice,
-				Amount:        quantity,
+				Amount:        big.NewFromString(cleanQuantity),
 				ExecutionTime: time.Now(),
 			})
 			log.Infof("%s exiting at price: %s", w.Symbol, price)
@@ -203,11 +212,11 @@ type Report struct {
 
 func (w *Watchdog) Report() Report {
 	return Report{
-		TotalProfit:          techan.TotalProfitAnalysis{}.Analyze(w.records),
+		TotalProfit:          TotalProfitAnalysis{w.Commission}.Analyze(w.records),
 		CommissionValue:      CommissionAnalysis{w.Commission}.Analyze(w.records),
-		OpenProfit:           OpenPLAnalysis{w.series.LastCandle()}.Analyze(w.records),
+		OpenProfit:           OpenPLAnalysis{w.series.LastCandle(), w.Commission}.Analyze(w.records),
 		TradeCount:           techan.NumTradesAnalysis{}.Analyze(w.records),
-		ProfitableTradeCount: ProfitableTradesAnalysis{}.Analyze(w.records),
+		ProfitableTradeCount: ProfitableTradesAnalysis{w.Commission}.Analyze(w.records),
 	}
 }
 

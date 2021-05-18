@@ -54,7 +54,7 @@ func (s *Server) CreateWatchdog(c *gin.Context) {
 			Interval:   d.Interval,
 			Risk:       d.Risk,
 			Leverage:   d.Leverage,
-			Commission: d.Commission * 0.01,
+			Commission: d.Commission,
 			Demo:       d.Demo,
 			SymbolInfo: s.info.Symbols[filterIndex],
 
@@ -165,6 +165,7 @@ func (s *Server) GetWatchdogAnalysis(c *gin.Context) {
 	w, ok := user.GetWatchdog(symbol, interval)
 	if !ok {
 		fail(c, http.StatusNotFound, fmt.Errorf("watchdog not found"))
+		return
 	}
 	c.JSON(http.StatusOK, w.Report())
 }
