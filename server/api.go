@@ -17,11 +17,14 @@ func (s *Server) InitAPI() {
 	r.GET("/watchdogs")
 	r.GET("/watchdog/:symbol/:interval", s.GetWatchdog)
 	r.POST("/watchdog", s.CreateWatchdog)
-	// r.PATCH("/watchdog/:symbol/:interval")
+	r.PATCH("/watchdog/:symbol/:interval")
 	r.DELETE("/watchdog/:symbol/:interval", s.StopWatchdog)
 
 	r.GET("/watchdog/:symbol/:interval/analysis", s.GetWatchdogAnalysis)
+	r.GET("/watchdog/:symbol/:interval/trades")
+
 	r.GET("/watchdogs/analysis", s.GetTotalAnalysis)
+	r.GET("/watchdogs/trades")
 
 	s.api = r
 }
