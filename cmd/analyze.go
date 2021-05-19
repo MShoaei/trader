@@ -17,11 +17,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// testCmd represents the test command
+// newAnalyzeCommand represents the analyze command
 func newAnalyzeCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "analyze",
-		Short: "analyze strategy using either crypto currency market data or forex data",
+		Short: "analyze strategy using either crypto currency market data",
 		Args:  cobra.NoArgs,
 	}
 	return cmd
