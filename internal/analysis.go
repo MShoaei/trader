@@ -107,9 +107,9 @@ func (ca CommissionAnalysis) Analyze(record *techan.TradingRecord) float64 {
 	for _, trade := range record.Trades {
 		amount := trade.EntranceOrder().Amount
 		commissionAmount := amount.Mul(big.NewDecimal(ca.Commission * 0.01))
-		total = total.Add(commissionAmount.Mul(trade.EntranceOrder().Price))
+		total = total.Add(commissionAmount.Mul(trade.ExitOrder().Price))
 
-		closeCommission := commissionAmount.Mul(trade.ExitOrder().Price).Mul(big.NewDecimal(ca.Commission * 0.01))
+		closeCommission := amount.Sub(commissionAmount).Mul(trade.ExitOrder().Price).Mul(big.NewDecimal(ca.Commission * 0.01))
 		total = total.Add(closeCommission)
 	}
 	return total.Float()
